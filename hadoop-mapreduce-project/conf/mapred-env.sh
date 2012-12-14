@@ -1,5 +1,3 @@
-#!/usr/bin/env bash
-
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.
@@ -15,24 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# export JAVA_HOME=/home/y/libexec/jdk1.6.0/
 
-# Start all hadoop daemons.  Run this on master node.
+export HADOOP_JOB_HISTORYSERVER_HEAPSIZE=1000
 
-echo "This script is Deprecated. Instead use start-dfs.sh and start-yarn.sh"
+export HADOOP_MAPRED_ROOT_LOGGER=INFO,RFA
 
-bin=`dirname "${BASH_SOURCE-$0}"`
-bin=`cd "$bin"; pwd`
-
-DEFAULT_LIBEXEC_DIR="$bin"/../libexec
-HADOOP_LIBEXEC_DIR=${HADOOP_LIBEXEC_DIR:-$DEFAULT_LIBEXEC_DIR}
-. $HADOOP_LIBEXEC_DIR/hadoop-config.sh
-
-# start hdfs daemons if hdfs is present
-if [ -f "${HADOOP_HDFS_HOME}"/sbin/start-dfs.sh ]; then
-  "${HADOOP_HDFS_HOME}"/sbin/start-dfs.sh --config $HADOOP_CONF_DIR
-fi
-
-# start yarn daemons if yarn is present
-if [ -f "${HADOOP_YARN_HOME}"/sbin/start-yarn.sh ]; then
-  "${HADOOP_YARN_HOME}"/sbin/start-yarn.sh --config $HADOOP_CONF_DIR
-fi
+#export HADOOP_JOB_HISTORYSERVER_OPTS=
+#export HADOOP_MAPRED_LOG_DIR="" # Where log files are stored.  $HADOOP_MAPRED_HOME/logs by default.
+#export HADOOP_JHS_LOGGER=INFO,RFA # Hadoop JobSummary logger.
+#export HADOOP_MAPRED_PID_DIR= # The pid files are stored. /tmp by default.
+#export HADOOP_MAPRED_IDENT_STRING= #A string representing this instance of hadoop. $USER by default
+#export HADOOP_MAPRED_NICENESS= #The scheduling priority for daemons. Defaults to 0.

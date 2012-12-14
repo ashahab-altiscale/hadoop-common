@@ -10,6 +10,8 @@ Release 2.0.2-alpha - 2012-09-07
     HADOOP-8689. Make trash a server side configuration option. (eli)
 
     HADOOP-8710. Remove ability for users to easily run the trash emptier. (eli)
+    
+    HADOOP-8794. Rename YARN_HOME to HADOOP_YARN_HOME. (vinodkv via acmurthy)
 
   NEW FEATURES
 
@@ -247,8 +249,6 @@ Release 2.0.2-alpha - 2012-09-07
 
     HADOOP-8031. Configuration class fails to find embedded .jar resources; 
     should use URL.openStream() (genman via tucu)
-
-    HADOOP-8738. junit JAR is showing up in the distro (tucu)
 
     HADOOP-8737. cmake: always use JAVA_HOME to find libjvm.so, jni.h, jni_md.h.
     (Colin Patrick McCabe via eli)
@@ -704,6 +704,8 @@ Release 0.23.4 - UNRELEASED
   NEW FEATURES
 
   IMPROVEMENTS
+
+    HADOOP-8822. relnotes.py was deleted post mavenization (bobby)
 
   OPTIMIZATIONS
 
