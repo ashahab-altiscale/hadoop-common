@@ -30,6 +30,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
 import org.apache.hadoop.metrics2.source.JvmMetrics;
 import org.apache.hadoop.security.SecurityUtil;
+import org.apache.hadoop.util.ExitUtil;
 import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.hadoop.util.ShutdownHookManager;
 import org.apache.hadoop.util.StringUtils;
@@ -42,14 +43,14 @@ import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.event.AsyncDispatcher;
 import org.apache.hadoop.yarn.event.Dispatcher;
 import org.apache.hadoop.yarn.event.EventHandler;
-import org.apache.hadoop.yarn.security.client.ClientToAMSecretManager;
 import org.apache.hadoop.yarn.server.RMDelegationTokenSecretManager;
 import org.apache.hadoop.yarn.server.resourcemanager.amlauncher.AMLauncherEventType;
 import org.apache.hadoop.yarn.server.resourcemanager.amlauncher.ApplicationMasterLauncher;
+import org.apache.hadoop.yarn.server.resourcemanager.recovery.NullRMStateStore;
 import org.apache.hadoop.yarn.server.resourcemanager.recovery.Recoverable;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.Store;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.Store.RMState;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.StoreFactory;
+import org.apache.hadoop.yarn.server.resourcemanager.recovery.RMStateStore;
+import org.apache.hadoop.yarn.server.resourcemanager.recovery.RMStateStore.RMState;
+import org.apache.hadoop.yarn.server.resourcemanager.recovery.RMStateStoreFactory;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMApp;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMAppEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMAppEventType;
@@ -64,9 +65,9 @@ import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNodeEventType;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ResourceScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.SchedulerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.SchedulerEventType;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.security.ApplicationTokenSecretManager;
 import org.apache.hadoop.yarn.server.resourcemanager.security.DelegationTokenRenewer;
+import org.apache.hadoop.yarn.server.resourcemanager.security.ClientToAMTokenSecretManagerInRM;
 import org.apache.hadoop.yarn.server.resourcemanager.security.RMContainerTokenSecretManager;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.RMWebApp;
 import org.apache.hadoop.yarn.server.security.ApplicationACLsManager;
@@ -80,6 +81,8 @@ import org.apache.hadoop.yarn.service.Service;
 import org.apache.hadoop.yarn.webapp.WebApp;
 import org.apache.hadoop.yarn.webapp.WebApps;
 import org.apache.hadoop.yarn.webapp.WebApps.Builder;
+
+import com.google.common.annotations.VisibleForTesting;
 
 /**
  * The ResourceManager is the main class that is a set of components.
@@ -97,8 +100,8 @@ public class ResourceManager extends CompositeService implements Recoverable {
   private static final Log LOG = LogFactory.getLog(ResourceManager.class);
   public static final long clusterTimeStamp = System.currentTimeMillis();
 
-  protected ClientToAMSecretManager clientToAMSecretManager =
-      new ClientToAMSecretManager();
+  protected ClientToAMTokenSecretManagerInRM clientToAMSecretManager =
+      new ClientToAMTokenSecretManagerInRM();
   
   protected RMContainerTokenSecretManager containerTokenSecretManager;
 
@@ -120,14 +123,13 @@ public class ResourceManager extends CompositeService implements Recoverable {
   protected RMDelegationTokenSecretManager rmDTSecretManager;
   private WebApp webApp;
   protected RMContext rmContext;
-  private final Store store;
   protected ResourceTrackerService resourceTracker;
+  private boolean recoveryEnabled;
 
   private Configuration conf;
-
-  public ResourceManager(Store store) {
+  
+  public ResourceManager() {
     super("ResourceManager");
-    this.store = store;
   }
   
   public RMContext getRMContext() {
@@ -161,12 +163,34 @@ public class ResourceManager extends CompositeService implements Recoverable {
 
     this.containerTokenSecretManager = createContainerTokenSecretManager(conf);
     
+    boolean isRecoveryEnabled = conf.getBoolean(
+        YarnConfiguration.RECOVERY_ENABLED,
+        YarnConfiguration.DEFAULT_RM_RECOVERY_ENABLED);
+    
+    RMStateStore rmStore = null;
+    if(isRecoveryEnabled) {
+      recoveryEnabled = true;
+      rmStore =  RMStateStoreFactory.getStore(conf);
+    } else {
+      recoveryEnabled = false;
+      rmStore = new NullRMStateStore();
+    }
+    try {
+      rmStore.init(conf);
+      rmStore.setDispatcher(rmDispatcher);
+    } catch (Exception e) {
+      // the Exception from stateStore.init() needs to be handled for 
+      // HA and we need to give up master status if we got fenced
+      LOG.error("Failed to init state store", e);
+      ExitUtil.terminate(1, e);
+    }
+    
     this.rmContext =
-        new RMContextImpl(this.store, this.rmDispatcher,
+        new RMContextImpl(this.rmDispatcher, rmStore,
           this.containerAllocationExpirer, amLivelinessMonitor,
           amFinishingMonitor, tokenRenewer, this.appTokenSecretManager,
-          this.containerTokenSecretManager);
-
+          this.containerTokenSecretManager, this.clientToAMSecretManager);
+    
     // Register event handler for NodesListManager
     this.nodesListManager = new NodesListManager(this.rmContext);
     this.rmDispatcher.register(NodesListManagerEventType.class, 
@@ -227,8 +251,14 @@ public class ResourceManager extends CompositeService implements Recoverable {
     addService(applicationMasterLauncher);
 
     new RMNMInfo(this.rmContext, this.scheduler);
-
+    
     super.init(conf);
+  }
+  
+  @VisibleForTesting
+  protected void setRMStateStore(RMStateStore rmStore) {
+    rmStore.setDispatcher(rmDispatcher);
+    ((RMContextImpl) rmContext).setStateStore(rmStore);
   }
 
   protected RMContainerTokenSecretManager createContainerTokenSecretManager(
@@ -256,14 +286,25 @@ public class ResourceManager extends CompositeService implements Recoverable {
   }
 
   protected ResourceScheduler createScheduler() {
-    return ReflectionUtils.newInstance(this.conf.getClass(
-        YarnConfiguration.RM_SCHEDULER, FifoScheduler.class,
-        ResourceScheduler.class), this.conf);
-  }
+    String schedulerClassName = conf.get(YarnConfiguration.RM_SCHEDULER,
+        YarnConfiguration.DEFAULT_RM_SCHEDULER);
+    LOG.info("Using Scheduler: " + schedulerClassName);
+    try {
+      Class<?> schedulerClazz = Class.forName(schedulerClassName);
+      if (ResourceScheduler.class.isAssignableFrom(schedulerClazz)) {
+        return (ResourceScheduler) ReflectionUtils.newInstance(schedulerClazz,
+            this.conf);
+      } else {
+        throw new YarnException("Class: " + schedulerClassName
+            + " not instance of " + ResourceScheduler.class.getCanonicalName());
+      }
+    } catch (ClassNotFoundException e) {
+      throw new YarnException("Could not instantiate Scheduler: "
+          + schedulerClassName, e);
+    }  }
 
   protected ApplicationMasterLauncher createAMLauncher() {
-    return new ApplicationMasterLauncher(this.clientToAMSecretManager,
-      this.rmContext);
+    return new ApplicationMasterLauncher(this.rmContext);
   }
 
   private NMLivelinessMonitor createNMLivelinessMonitor() {
@@ -280,9 +321,8 @@ public class ResourceManager extends CompositeService implements Recoverable {
   }
 
   protected RMAppManager createRMAppManager() {
-    return new RMAppManager(this.rmContext, this.clientToAMSecretManager,
-        this.scheduler, this.masterService, this.applicationACLsManager,
-        this.conf);
+    return new RMAppManager(this.rmContext, this.scheduler, this.masterService,
+      this.applicationACLsManager, this.conf);
   }
 
   @Private
@@ -493,6 +533,19 @@ public class ResourceManager extends CompositeService implements Recoverable {
     this.appTokenSecretManager.start();
     this.containerTokenSecretManager.start();
 
+    if(recoveryEnabled) {
+      try {
+        RMStateStore rmStore = rmContext.getStateStore();
+        RMState state = rmStore.loadState();
+        recover(state);
+      } catch (Exception e) {
+        // the Exception from loadState() needs to be handled for 
+        // HA and we need to give up master status if we got fenced
+        LOG.error("Failed to load/recover state", e);
+        ExitUtil.terminate(1, e);
+      }
+    }
+
     startWepApp();
     DefaultMetricsSystem.initialize("ResourceManager");
     JvmMetrics.initSingleton("ResourceManager", null);
@@ -546,6 +599,13 @@ public class ResourceManager extends CompositeService implements Recoverable {
 
     DefaultMetricsSystem.shutdown();
 
+    RMStateStore store = rmContext.getStateStore();
+    try {
+      store.close();
+    } catch (Exception e) {
+      LOG.error("Error closing store.", e);
+    }
+      
     super.stop();
   }
   
@@ -634,8 +694,8 @@ public class ResourceManager extends CompositeService implements Recoverable {
 
   @Override
   public void recover(RMState state) throws Exception {
-    resourceTracker.recover(state);
-    scheduler.recover(state);
+    // recover applications
+    rmAppManager.recover(state);
   }
   
   public static void main(String argv[]) {
@@ -643,14 +703,11 @@ public class ResourceManager extends CompositeService implements Recoverable {
     StringUtils.startupShutdownMessage(ResourceManager.class, argv, LOG);
     try {
       Configuration conf = new YarnConfiguration();
-      Store store =  StoreFactory.getStore(conf);
-      ResourceManager resourceManager = new ResourceManager(store);
+      ResourceManager resourceManager = new ResourceManager();
       ShutdownHookManager.get().addShutdownHook(
         new CompositeServiceShutdownHook(resourceManager),
         SHUTDOWN_HOOK_PRIORITY);
       resourceManager.init(conf);
-      //resourceManager.recover(store.restore());
-      //store.doneWithRecovery();
       resourceManager.start();
     } catch (Throwable t) {
       LOG.fatal("Error starting ResourceManager", t);

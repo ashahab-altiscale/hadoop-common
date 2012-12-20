@@ -17,7 +17,6 @@
  */
 package org.apache.hadoop.security;
 
-import static org.apache.hadoop.fs.CommonConfigurationKeys.HADOOP_SECURITY_AUTHENTICATION;
 
 import java.io.IOException;
 import java.lang.reflect.UndeclaredThrowableException;
@@ -57,6 +56,7 @@ import org.apache.hadoop.metrics2.annotation.Metric;
 import org.apache.hadoop.metrics2.annotation.Metrics;
 import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
 import org.apache.hadoop.metrics2.lib.MutableRate;
+import org.apache.hadoop.security.SaslRpcServer.AuthMethod;
 import org.apache.hadoop.security.authentication.util.KerberosName;
 import org.apache.hadoop.security.authentication.util.KerberosUtil;
 import org.apache.hadoop.security.token.Token;
@@ -79,6 +79,7 @@ public class UserGroupInformation {
    */
   private static final float TICKET_RENEW_WINDOW = 0.80f;
   static final String HADOOP_USER_NAME = "HADOOP_USER_NAME";
+  static final String HADOOP_PROXY_USER = "HADOOP_PROXY_USER";
   
   /** 
    * UgiMetrics maintains UGI activity statistics
@@ -130,7 +131,7 @@ public class UserGroupInformation {
       }
       Principal user = null;
       // if we are using kerberos, try it out
-      if (useKerberos) {
+      if (isAuthenticationMethodEnabled(AuthenticationMethod.KERBEROS)) {
         user = getCanonicalUser(KerberosPrincipal.class);
         if (LOG.isDebugEnabled()) {
           LOG.debug("using kerberos user:"+user);
@@ -188,8 +189,8 @@ public class UserGroupInformation {
   static UgiMetrics metrics = UgiMetrics.create();
   /** Are the static variables that depend on configuration initialized? */
   private static boolean isInitialized = false;
-  /** Should we use Kerberos configuration? */
-  private static boolean useKerberos;
+  /** The auth method to use */
+  private static AuthenticationMethod authenticationMethod;
   /** Server-side groups fetching service */
   private static Groups groups;
   /** The configuration to use */
@@ -235,16 +236,7 @@ public class UserGroupInformation {
    * @param conf the configuration to use
    */
   private static synchronized void initUGI(Configuration conf) {
-    String value = conf.get(HADOOP_SECURITY_AUTHENTICATION);
-    if (value == null || "simple".equals(value)) {
-      useKerberos = false;
-    } else if ("kerberos".equals(value)) {
-      useKerberos = true;
-    } else {
-      throw new IllegalArgumentException("Invalid attribute value for " +
-                                         HADOOP_SECURITY_AUTHENTICATION + 
-                                         " of " + value);
-    }
+    authenticationMethod = SecurityUtil.getAuthenticationMethod(conf);
     // If we haven't set up testing groups, use the configuration to find it
     if (!(groups instanceof TestingGroups)) {
       groups = Groups.getUserToGroupsMappingService(conf);
@@ -272,8 +264,14 @@ public class UserGroupInformation {
    * @return true if UGI is working in a secure environment
    */
   public static boolean isSecurityEnabled() {
+    return !isAuthenticationMethodEnabled(AuthenticationMethod.SIMPLE);
+  }
+  
+  @InterfaceAudience.Private
+  @InterfaceStability.Evolving
+  private static boolean isAuthenticationMethodEnabled(AuthenticationMethod method) {
     ensureInitialized();
-    return useKerberos;
+    return (authenticationMethod == method);
   }
   
   /**
@@ -291,13 +289,17 @@ public class UserGroupInformation {
   
   private static String OS_LOGIN_MODULE_NAME;
   private static Class<? extends Principal> OS_PRINCIPAL_CLASS;
-  private static final boolean windows = 
-                           System.getProperty("os.name").startsWith("Windows");
+  private static final boolean windows =
+      System.getProperty("os.name").startsWith("Windows");
+  private static final boolean is64Bit =
+      System.getProperty("os.arch").contains("64");
   /* Return the OS login module class name */
   private static String getOSLoginModuleName() {
     if (System.getProperty("java.vendor").contains("IBM")) {
-      return windows ? "com.ibm.security.auth.module.NTLoginModule"
-       : "com.ibm.security.auth.module.LinuxLoginModule";
+      return windows ? (is64Bit
+          ? "com.ibm.security.auth.module.Win64LoginModule"
+          : "com.ibm.security.auth.module.NTLoginModule")
+        : "com.ibm.security.auth.module.LinuxLoginModule";
     } else {
       return windows ? "com.sun.security.auth.module.NTLoginModule"
         : "com.sun.security.auth.module.UnixLoginModule";
@@ -311,13 +313,13 @@ public class UserGroupInformation {
     try {
       if (System.getProperty("java.vendor").contains("IBM")) {
         if (windows) {
-          return (Class<? extends Principal>)
-            cl.loadClass("com.ibm.security.auth.UsernamePrincipal");
+          return (Class<? extends Principal>) (is64Bit
+            ? cl.loadClass("com.ibm.security.auth.UsernamePrincipal")
+            : cl.loadClass("com.ibm.security.auth.NTUserPrincipal"));
         } else {
-          return (Class<? extends Principal>)
-            (System.getProperty("os.arch").contains("64")
-             ? cl.loadClass("com.ibm.security.auth.UsernamePrincipal")
-             : cl.loadClass("com.ibm.security.auth.LinuxPrincipal"));
+          return (Class<? extends Principal>) (is64Bit
+            ? cl.loadClass("com.ibm.security.auth.UsernamePrincipal")
+            : cl.loadClass("com.ibm.security.auth.LinuxPrincipal"));
         }
       } else {
         return (Class<? extends Principal>) (windows
@@ -569,7 +571,7 @@ public class UserGroupInformation {
   @InterfaceStability.Evolving
   public static UserGroupInformation getUGIFromTicketCache(
             String ticketCache, String user) throws IOException {
-    if (!isSecurityEnabled()) {
+    if (!isAuthenticationMethodEnabled(AuthenticationMethod.KERBEROS)) {
       return getBestUGI(null, user);
     }
     try {
@@ -622,23 +624,25 @@ public class UserGroupInformation {
   public synchronized 
   static UserGroupInformation getLoginUser() throws IOException {
     if (loginUser == null) {
+      ensureInitialized();
       try {
         Subject subject = new Subject();
-        LoginContext login;
-        if (isSecurityEnabled()) {
-          login = newLoginContext(HadoopConfiguration.USER_KERBEROS_CONFIG_NAME,
-              subject, new HadoopConfiguration());
-        } else {
-          login = newLoginContext(HadoopConfiguration.SIMPLE_CONFIG_NAME, 
-              subject, new HadoopConfiguration());
-        }
+        LoginContext login =
+            newLoginContext(authenticationMethod.getLoginAppName(), 
+                            subject, new HadoopConfiguration());
         login.login();
-        loginUser = new UserGroupInformation(subject);
-        loginUser.setLogin(login);
-        loginUser.setAuthenticationMethod(isSecurityEnabled() ?
-                                          AuthenticationMethod.KERBEROS :
-                                          AuthenticationMethod.SIMPLE);
-        loginUser = new UserGroupInformation(login.getSubject());
+        UserGroupInformation realUser = new UserGroupInformation(subject);
+        realUser.setLogin(login);
+        realUser.setAuthenticationMethod(authenticationMethod);
+        realUser = new UserGroupInformation(login.getSubject());
+        // If the HADOOP_PROXY_USER environment variable or property
+        // is specified, create a proxy user as the logged in user.
+        String proxyUser = System.getenv(HADOOP_PROXY_USER);
+        if (proxyUser == null) {
+          proxyUser = System.getProperty(HADOOP_PROXY_USER);
+        }
+        loginUser = proxyUser == null ? realUser : createProxyUser(proxyUser, realUser);
+
         String fileLocation = System.getenv(HADOOP_TOKEN_FILE_LOCATION);
         if (fileLocation != null) {
           // load the token storage file and put all of the tokens into the
@@ -658,6 +662,14 @@ public class UserGroupInformation {
     return loginUser;
   }
 
+  @InterfaceAudience.Private
+  @InterfaceStability.Unstable
+  synchronized static void setLoginUser(UserGroupInformation ugi) {
+    // if this is to become stable, should probably logout the currently
+    // logged in ugi if it's different
+    loginUser = ugi;
+  }
+  
   /**
    * Is this user logged in from a keytab file?
    * @return true if the credentials are from a keytab file.
@@ -1008,13 +1020,50 @@ public class UserGroupInformation {
   @InterfaceAudience.Public
   @InterfaceStability.Evolving
   public static enum AuthenticationMethod {
-    SIMPLE,
-    KERBEROS,
-    TOKEN,
-    CERTIFICATE,
-    KERBEROS_SSL,
-    PROXY;
-  }
+    // currently we support only one auth per method, but eventually a 
+    // subtype is needed to differentiate, ex. if digest is token or ldap
+    SIMPLE(AuthMethod.SIMPLE,
+        HadoopConfiguration.SIMPLE_CONFIG_NAME),
+    KERBEROS(AuthMethod.KERBEROS,
+        HadoopConfiguration.USER_KERBEROS_CONFIG_NAME),
+    TOKEN(AuthMethod.DIGEST),
+    CERTIFICATE(null),
+    KERBEROS_SSL(null),
+    PROXY(null);
+    
+    private final AuthMethod authMethod;
+    private final String loginAppName;
+    
+    private AuthenticationMethod(AuthMethod authMethod) {
+      this(authMethod, null);
+    }
+    private AuthenticationMethod(AuthMethod authMethod, String loginAppName) {
+      this.authMethod = authMethod;
+      this.loginAppName = loginAppName;
+    }
+    
+    public AuthMethod getAuthMethod() {
+      return authMethod;
+    }
+    
+    String getLoginAppName() {
+      if (loginAppName == null) {
+        throw new UnsupportedOperationException(
+            this + " login authentication is not supported");
+      }
+      return loginAppName;
+    }
+    
+    public static AuthenticationMethod valueOf(AuthMethod authMethod) {
+      for (AuthenticationMethod value : values()) {
+        if (value.getAuthMethod() == authMethod) {
+          return value;
+        }
+      }
+      throw new IllegalArgumentException(
+          "no authentication method for " + authMethod);
+    }
+  };
 
   /**
    * Create a proxy user using username of the effective user and the ugi of the
@@ -1280,6 +1329,15 @@ public class UserGroupInformation {
   }
 
   /**
+   * Sets the authentication method in the subject
+   * 
+   * @param authMethod
+   */
+  public void setAuthenticationMethod(AuthMethod authMethod) {
+    user.setAuthenticationMethod(AuthenticationMethod.valueOf(authMethod));
+  }
+
+  /**
    * Get the authentication method from the subject
    * 
    * @return AuthenticationMethod in the subject, null if not present.
@@ -1287,7 +1345,21 @@ public class UserGroupInformation {
   public synchronized AuthenticationMethod getAuthenticationMethod() {
     return user.getAuthenticationMethod();
   }
-  
+
+  /**
+   * Get the authentication method from the real user's subject.  If there
+   * is no real user, return the given user's authentication method.
+   * 
+   * @return AuthenticationMethod in the subject, null if not present.
+   */
+  public synchronized AuthenticationMethod getRealAuthenticationMethod() {
+    UserGroupInformation ugi = getRealUser();
+    if (ugi == null) {
+      ugi = this;
+    }
+    return ugi.getAuthenticationMethod();
+  }
+
   /**
    * Returns the authentication method of a ugi. If the authentication method is
    * PROXY, returns the authentication method of the real user.

@@ -518,7 +518,8 @@ public class ClientNamenodeProtocolServerSideTranslatorPB implements
   public SetSafeModeResponseProto setSafeMode(RpcController controller,
       SetSafeModeRequestProto req) throws ServiceException {
     try {
-      boolean result = server.setSafeMode(PBHelper.convert(req.getAction()));
+      boolean result = server.setSafeMode(PBHelper.convert(req.getAction()),
+          req.getChecked());
       return SetSafeModeResponseProto.newBuilder().setResult(result).build();
     } catch (IOException e) {
       throw new ServiceException(e);
@@ -687,7 +688,7 @@ public class ClientNamenodeProtocolServerSideTranslatorPB implements
   public FsyncResponseProto fsync(RpcController controller,
       FsyncRequestProto req) throws ServiceException {
     try {
-      server.fsync(req.getSrc(), req.getClient());
+      server.fsync(req.getSrc(), req.getClient(), req.getLastBlockLength());
       return VOID_FSYNC_RESPONSE;
     } catch (IOException e) {
       throw new ServiceException(e);

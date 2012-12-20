@@ -39,6 +39,8 @@ import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_CLIENT_READ_PREFETCH_SIZE
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_CLIENT_RETRY_WINDOW_BASE;
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_CLIENT_SOCKET_CACHE_CAPACITY_DEFAULT;
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_CLIENT_SOCKET_CACHE_CAPACITY_KEY;
+import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_CLIENT_SOCKET_CACHE_EXPIRY_MSEC_DEFAULT;
+import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_CLIENT_SOCKET_CACHE_EXPIRY_MSEC_KEY;
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_CLIENT_SOCKET_TIMEOUT_KEY;
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_CLIENT_USE_LEGACY_BLOCKREADER;
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_CLIENT_USE_LEGACY_BLOCKREADER_DEFAULT;
@@ -210,6 +212,7 @@ public class DFSClient implements java.io.Closeable {
     final int writePacketSize;
     final int socketTimeout;
     final int socketCacheCapacity;
+    final long socketCacheExpiry;
     /** Wait time window (in msec) if BlockMissingException is caught */
     final int timeWindow;
     final int nCachedConnRetry;
@@ -258,6 +261,8 @@ public class DFSClient implements java.io.Closeable {
       taskId = conf.get("mapreduce.task.attempt.id", "NONMAPREDUCE");
       socketCacheCapacity = conf.getInt(DFS_CLIENT_SOCKET_CACHE_CAPACITY_KEY,
           DFS_CLIENT_SOCKET_CACHE_CAPACITY_DEFAULT);
+      socketCacheExpiry = conf.getLong(DFS_CLIENT_SOCKET_CACHE_EXPIRY_MSEC_KEY,
+          DFS_CLIENT_SOCKET_CACHE_EXPIRY_MSEC_DEFAULT);
       prefetchSize = conf.getLong(DFS_CLIENT_READ_PREFETCH_SIZE_KEY,
           10 * defaultBlockSize);
       timeWindow = conf
@@ -428,7 +433,7 @@ public class DFSClient implements java.io.Closeable {
       Joiner.on(',').join(localInterfaceAddrs) + "]");
     }
     
-    this.socketCache = new SocketCache(dfsClientConf.socketCacheCapacity);
+    this.socketCache = SocketCache.getInstance(dfsClientConf.socketCacheCapacity, dfsClientConf.socketCacheExpiry);
   }
 
   /**
@@ -642,14 +647,13 @@ public class DFSClient implements java.io.Closeable {
   void abort() {
     clientRunning = false;
     closeAllFilesBeingWritten(true);
-    socketCache.clear();
 
     try {
       // remove reference to this client and stop the renewer,
       // if there is no more clients under the renewer.
       getLeaseRenewer().closeClient(this);
     } catch (IOException ioe) {
-       LOG.info("Exception occurred while aborting the client. " + ioe);
+       LOG.info("Exception occurred while aborting the client " + ioe);
     }
     closeConnectionToNamenode();
   }
@@ -689,7 +693,6 @@ public class DFSClient implements java.io.Closeable {
   public synchronized void close() throws IOException {
     if(clientRunning) {
       closeAllFilesBeingWritten(false);
-      socketCache.clear();
       clientRunning = false;
       getLeaseRenewer().closeClient(this);
       // close connections to the namenode
@@ -1792,6 +1795,13 @@ public class DFSClient implements java.io.Closeable {
         return new MD5MD5CRC32CastagnoliFileChecksum(bytesPerCRC,
             crcPerBlock, fileMD5);
       default:
+        // If there is no block allocated for the file,
+        // return one with the magic entry that matches what previous
+        // hdfs versions return.
+        if (locatedblocks.size() == 0) {
+          return new MD5MD5CRC32GzipFileChecksum(0, 0, fileMD5);
+        }
+
         // we should never get here since the validity was checked
         // when getCrcType() was called above.
         return null;
@@ -1890,10 +1900,25 @@ public class DFSClient implements java.io.Closeable {
   /**
    * Enter, leave or get safe mode.
    * 
-   * @see ClientProtocol#setSafeMode(HdfsConstants.SafeModeAction)
+   * @see ClientProtocol#setSafeMode(HdfsConstants.SafeModeAction,boolean)
    */
   public boolean setSafeMode(SafeModeAction action) throws IOException {
-    return namenode.setSafeMode(action);
+    return setSafeMode(action, false);
+  }
+  
+  /**
+   * Enter, leave or get safe mode.
+   * 
+   * @param action
+   *          One of SafeModeAction.GET, SafeModeAction.ENTER and
+   *          SafeModeActiob.LEAVE
+   * @param isChecked
+   *          If true, then check only active namenode's safemode status, else
+   *          check first namenode's status.
+   * @see ClientProtocol#setSafeMode(HdfsConstants.SafeModeActio,boolean)
+   */
+  public boolean setSafeMode(SafeModeAction action, boolean isChecked) throws IOException{
+    return namenode.setSafeMode(action, isChecked);    
   }
 
   /**
@@ -2127,7 +2152,7 @@ public class DFSClient implements java.io.Closeable {
       reportBadBlocks(lblocks);
     } catch (IOException ie) {
       LOG.info("Found corruption while reading " + file
-          + ".  Error repairing corrupt blocks.  Bad blocks remain.", ie);
+          + ". Error repairing corrupt blocks. Bad blocks remain.", ie);
     }
   }
 

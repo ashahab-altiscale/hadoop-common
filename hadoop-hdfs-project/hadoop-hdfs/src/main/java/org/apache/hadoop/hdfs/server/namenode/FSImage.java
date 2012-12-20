@@ -38,7 +38,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.protocol.HdfsConstants;
 import org.apache.hadoop.hdfs.protocol.LayoutVersion;
 import org.apache.hadoop.hdfs.protocol.LayoutVersion.Feature;
-import org.apache.hadoop.hdfs.server.common.GenerationStamp;
+import org.apache.hadoop.hdfs.server.common.Storage.FormatConfirmable;
 import org.apache.hadoop.hdfs.server.common.InconsistentFSStateException;
 import org.apache.hadoop.hdfs.server.common.Storage;
 import org.apache.hadoop.hdfs.server.common.Storage.StorageDirectory;
@@ -90,7 +90,7 @@ public class FSImage implements Closeable {
 
   final private Configuration conf;
 
-  private final NNStorageRetentionManager archivalManager;
+  protected NNStorageRetentionManager archivalManager;
 
   /**
    * Construct an FSImage
@@ -126,12 +126,6 @@ public class FSImage implements Closeable {
     }
 
     this.editLog = new FSEditLog(conf, storage, editsDirs);
-    String nameserviceId = DFSUtil.getNamenodeNameServiceId(conf);
-    if (!HAUtil.isHAEnabled(conf, nameserviceId)) {
-      editLog.initJournalsForWrite();
-    } else {
-      editLog.initSharedJournalsForRead();
-    }
     
     archivalManager = new NNStorageRetentionManager(conf, storage, editLog);
   }
@@ -144,8 +138,31 @@ public class FSImage implements Closeable {
         fileCount + " files");
     NamespaceInfo ns = NNStorage.newNamespaceInfo();
     ns.clusterID = clusterId;
+    
     storage.format(ns);
+    editLog.formatNonFileJournals(ns);
     saveFSImageInAllDirs(fsn, 0);
+  }
+  
+  /**
+   * Check whether the storage directories and non-file journals exist.
+   * If running in interactive mode, will prompt the user for each
+   * directory to allow them to format anyway. Otherwise, returns
+   * false, unless 'force' is specified.
+   * 
+   * @param force format regardless of whether dirs exist
+   * @param interactive prompt the user when a dir exists
+   * @return true if formatting should proceed
+   * @throws IOException if some storage cannot be accessed
+   */
+  boolean confirmFormat(boolean force, boolean interactive) throws IOException {
+    List<FormatConfirmable> confirms = Lists.newArrayList();
+    for (StorageDirectory sd : storage.dirIterable(null)) {
+      confirms.add(sd);
+    }
+    
+    confirms.addAll(editLog.getFormatConfirmables());
+    return Storage.confirmFormat(confirms, force, interactive);
   }
   
   /**
@@ -496,6 +513,7 @@ public class FSImage implements Closeable {
     // return back the real image
     realImage.getStorage().setStorageInfo(ckptImage.getStorage());
     realImage.getEditLog().setNextTxId(ckptImage.getEditLog().getLastWrittenTxId()+1);
+    realImage.initEditLog();
 
     target.dir.fsImage = realImage;
     realImage.getStorage().setBlockPoolID(ckptImage.getBlockPoolID());
@@ -568,10 +586,8 @@ public class FSImage implements Closeable {
 
     Iterable<EditLogInputStream> editStreams = null;
 
-    if (editLog.isOpenForWrite()) {
-      // We only want to recover streams if we're going into Active mode.
-      editLog.recoverUnclosedStreams();
-    }
+    initEditLog();
+
     if (LayoutVersion.supports(Feature.TXID_BASED_LAYOUT, 
                                getLayoutVersion())) {
       // If we're open for write, we're either non-HA or we're the active NN, so
@@ -629,6 +645,17 @@ public class FSImage implements Closeable {
     return needToSave;
   }
 
+  public void initEditLog() {
+    Preconditions.checkState(getNamespaceID() != 0,
+        "Must know namespace ID before initting edit log");
+    String nameserviceId = DFSUtil.getNamenodeNameServiceId(conf);
+    if (!HAUtil.isHAEnabled(conf, nameserviceId)) {
+      editLog.initJournalsForWrite();
+      editLog.recoverUnclosedStreams();
+    } else {
+      editLog.initSharedJournalsForRead();
+    }
+  }
 
   /**
    * @param imageFile the image file that was loaded
@@ -991,6 +1018,7 @@ public class FSImage implements Closeable {
   NamenodeCommand startCheckpoint(NamenodeRegistration bnReg, // backup node
                                   NamenodeRegistration nnReg) // active name-node
   throws IOException {
+    LOG.info("Start checkpoint at txid " + getEditLog().getLastWrittenTxId());
     String msg = null;
     // Verify that checkpoint is allowed
     if(bnReg.getNamespaceID() != storage.getNamespaceID())
@@ -1030,6 +1058,7 @@ public class FSImage implements Closeable {
    * @throws IOException if the checkpoint fields are inconsistent
    */
   void endCheckpoint(CheckpointSignature sig) throws IOException {
+    LOG.info("End checkpoint at txid " + getEditLog().getLastWrittenTxId());
     sig.validateStorageInfo(this);
   }
 

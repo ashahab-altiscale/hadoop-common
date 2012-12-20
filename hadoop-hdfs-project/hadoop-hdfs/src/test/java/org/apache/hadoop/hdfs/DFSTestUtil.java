@@ -85,6 +85,7 @@ import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.util.VersionInfo;
 
+import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
 
 /** Utilities for HDFS tests */
@@ -506,7 +507,7 @@ public class DFSTestUtil {
   public static void waitReplication(FileSystem fs, Path fileName, short replFactor)
       throws IOException, InterruptedException, TimeoutException {
     boolean correctReplFactor;
-    final int ATTEMPTS = 20;
+    final int ATTEMPTS = 40;
     int count = 0;
 
     do {
@@ -594,12 +595,21 @@ public class DFSTestUtil {
     IOUtils.copyBytes(is, os, s.length(), true);
   }
   
-  // Returns url content as string.
+  /**
+   * @return url content as string (UTF-8 encoding assumed)
+   */
   public static String urlGet(URL url) throws IOException {
+    return new String(urlGetBytes(url), Charsets.UTF_8);
+  }
+  
+  /**
+   * @return URL contents as a byte array
+   */
+  public static byte[] urlGetBytes(URL url) throws IOException {
     URLConnection conn = url.openConnection();
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     IOUtils.copyBytes(conn.getInputStream(), out, 4096, true);
-    return out.toString();
+    return out.toByteArray();
   }
   
   /**

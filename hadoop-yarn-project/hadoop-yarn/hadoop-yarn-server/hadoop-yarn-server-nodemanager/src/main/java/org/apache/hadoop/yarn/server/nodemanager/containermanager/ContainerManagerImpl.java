@@ -23,6 +23,8 @@ import static org.apache.hadoop.yarn.service.Service.STATE.STARTED;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -329,7 +331,6 @@ public class ContainerManagerImpl extends CompositeService implements
             + remoteUgi.getTokenIdentifiers().size());
       }
 
-
       // Get the tokenId from the remote user ugi
       ContainerTokenIdentifier tokenId =
           selectContainerTokenIdentifier(remoteUgi);
@@ -341,8 +342,16 @@ public class ContainerManagerImpl extends CompositeService implements
                 + containerIDStr);
       } else {
 
+        // Is the container coming in with correct user-name?
+        if (!tokenId.getApplicationSubmitter().equals(launchContext.getUser())) {
+          unauthorized = true;
+          messageBuilder.append("\n Expected user-name "
+              + tokenId.getApplicationSubmitter() + " but found "
+              + launchContext.getUser());
+        }
+
         // Is the container being relaunched? Or RPC layer let startCall with 
-    	//  tokens generated off old-secret through 
+      	//  tokens generated off old-secret through?
         if (!this.context.getContainerTokenSecretManager()
           .isValidStartContainerRequest(tokenId)) {
           unauthorized = true;
@@ -586,9 +595,16 @@ public class ContainerManagerImpl extends CompositeService implements
           (CMgrCompletedContainersEvent) event;
       for (ContainerId container : containersFinishedEvent
           .getContainersToCleanup()) {
+        String diagnostic = "";
+        if (containersFinishedEvent.getReason() == 
+            CMgrCompletedContainersEvent.Reason.ON_SHUTDOWN) {
+          diagnostic = "Container Killed on Shutdown";
+        } else if (containersFinishedEvent.getReason() == 
+            CMgrCompletedContainersEvent.Reason.BY_RESOURCEMANAGER) {
+          diagnostic = "Container Killed by ResourceManager";
+        }
         this.dispatcher.getEventHandler().handle(
-            new ContainerKillEvent(container,
-                "Container Killed by ResourceManager"));
+            new ContainerKillEvent(container, diagnostic));
       }
       break;
     default:

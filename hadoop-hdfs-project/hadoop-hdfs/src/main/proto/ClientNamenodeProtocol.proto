@@ -20,6 +20,7 @@ option java_package = "org.apache.hadoop.hdfs.protocol.proto";
 option java_outer_classname = "ClientNamenodeProtocolProtos";
 option java_generic_services = true;
 option java_generate_equals_and_hash = true;
+package hadoop.hdfs;
 
 import "hdfs.proto";
 
@@ -264,6 +265,7 @@ enum SafeModeActionProto {
 
 message SetSafeModeRequestProto {
   required SafeModeActionProto action = 1;
+  optional bool checked = 2 [default = false];
 }
 
 message SetSafeModeResponseProto {
@@ -355,6 +357,7 @@ message SetQuotaResponseProto { // void response
 message FsyncRequestProto {
   required string src = 1;
   required string client = 2;
+  optional sint64 lastBlockLength = 3 [default = -1];
 }
 
 message FsyncResponseProto { // void response

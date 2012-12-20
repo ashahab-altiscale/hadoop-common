@@ -1,17 +1,30 @@
 Hadoop HDFS Change Log
 
 Release 2.0.3-alpha - Unreleased
-  
+
   INCOMPATIBLE CHANGES
+
+    HDFS-4122. Cleanup HDFS logs and reduce the size of logged messages.
+    (suresh)
 
   NEW FEATURES
 
     HDFS-2656. Add libwebhdfs, a pure C client based on WebHDFS.
     (Jaimin D Jetly and Jing Zhao via szetszwo)
 
-    HDFS-3703. Datanodes are marked stale if heartbeat is not received in
-    configured timeout and are selected as the last location to read from.
+    HDFS-3912. Detect and avoid stale datanodes for writes.
     (Jing Zhao via suresh)
+
+    HDFS-4059. Add number of stale DataNodes to metrics. (Jing Zhao via suresh)
+
+    HDFS-4155. libhdfs implementation of hsync API (Liang Xie via todd)
+
+    HDFS-4213. Add an API to hsync for updating the last block length at the
+    namenode. (Jing Zhao via szetszwo)
+
+    HDFS-3077. Implement QuorumJournalManager, a distributed mechanism for
+    reliably storing HDFS edit logs. See dedicated section below for breakdown
+    of subtasks.
 
   IMPROVEMENTS
   
@@ -19,6 +32,126 @@ Release 2.0.3-alpha - Unreleased
     (Andrew Wang via todd)
 
     HDFS-3939. NN RPC address cleanup. (eli)
+
+    HDFS-3373. Change DFSClient input stream socket cache to global static and
+    add a thread to cleanup expired cache entries. (John George via szetszwo)
+
+    HDFS-3896. Add descriptions for dfs.namenode.rpc-address and
+    dfs.namenode.servicerpc-address to hdfs-default.xml. (Jeff Lord via atm)
+
+    HDFS-3996. Add debug log removed in HDFS-3873 back. (eli)
+
+    HDFS-3916. libwebhdfs (C client) code cleanups.
+    (Colin Patrick McCabe via eli)
+
+    HDFS-3813. Log error message if security and WebHDFS are enabled but
+    principal/keytab are not configured. (Stephen Chu via atm)
+
+    HDFS-3483. Better error message when hdfs fsck is run against a ViewFS
+    config. (Stephen Fritz via atm)
+
+    HDFS-3682. MiniDFSCluster#init should provide more info when it fails.
+    (todd via eli)
+
+    HDFS-4008. TestBalancerWithEncryptedTransfer needs a timeout. (eli)
+
+    HDFS-4007. Rehabilitate bit-rotted unit tests under
+    hadoop-hdfs-project/hadoop-hdfs/src/test/unit/ 
+    (Colin Patrick McCabe via todd)
+
+    HDFS-4041. Hadoop HDFS Maven protoc calls must not depend on external
+    sh script. (Chris Nauroth via suresh)
+
+    HADOOP-8911. CRLF characters in source and text files.
+    (Raja Aluri via suresh)
+
+    HDFS-4037. Rename the getReplication() method in BlockCollection to
+    getBlockReplication(). (szetszwo)
+
+    HDFS-4036. Remove "throws UnresolvedLinkException" from
+    FSDirectory.unprotectedAddFile(..). (Jing Zhao via szetszwo)
+
+    HDFS-2946. HA: Put a cap on the number of completed edits files retained
+    by the NN. (atm)
+
+    HDFS-4029. GenerationStamp should use an AtomicLong. (eli)
+
+    HDFS-4068. DatanodeID and DatanodeInfo member should be private. (eli)
+
+    HDFS-4073. Two minor improvements to FSDirectory.  (Jing Zhao via szetszwo)
+
+    HDFS-4074. Remove the unused default constructor from INode.  (Brandon Li
+    via szetszwo)
+
+    HDFS-4088. Remove "throws QuotaExceededException" from an
+    INodeDirectoryWithQuota constructor. (szetszwo)
+
+    HDFS-4099. Clean up replication code and add more javadoc. (szetszwo)
+
+    HDFS-4107. Add utility methods for casting INode to INodeFile and
+    INodeFileUnderConstruction. (szetszwo)
+
+    HDFS-4112. A few improvements on INodeDirectory include adding a utility
+    method for casting; avoiding creation of new empty lists; cleaning up 
+    some code and rewriting some javadoc. (szetszwo)
+
+    HDFS-4121. Add namespace declarations in hdfs .proto files for languages 
+    other than java. (Binglin Chang via suresh)
+
+    HDFS-3573. Supply NamespaceInfo when instantiating JournalManagers. 
+    (todd and ivank via umamahesh)
+
+    HDFS-3695. Genericize format() to non-file JournalManagers. 
+    (todd via umamahesh)
+
+    HDFS-3789. JournalManager#format() should be able to throw IOException. 
+    (Ivan Kelly via umamahesh)
+
+    HDFS-3809. Make BKJM use protobufs for all serialization with ZK. 
+    (Ivan Kelly via umamhesh)
+
+    HDFS-3916. libwebhdfs testing code cleanup. (Jing Zhao via suresh)
+
+    HDFS-4143. Change blocks to private in INodeFile and renames isLink() to
+    isSymlink() in INode. (szetszwo)
+
+    HDFS-4046. Rename ChecksumTypeProto enum NULL since it is illegal in
+    C/C++. (Binglin Chang via suresh)
+
+    HDFS-4048. Use ERROR instead of INFO for volume failure logs.
+    (Stephen Chu via eli)
+
+    HDFS-1322. Document umask in DistributedFileSystem#mkdirs javadocs.
+    (Colin Patrick McCabe via eli)
+
+    HDFS-4038. Override toString() for BookKeeperEditLogInputStream.
+    (Vinay via umamahesh)
+
+    HDFS-4214. OfflineEditsViewer should print out the offset at which it
+    encountered an error. (Colin Patrick McCabe via atm)
+
+    HDFS-4199. Provide test for HdfsVolumeId. (Ivan A. Veselovsky via atm)
+
+    HDFS-3049. During the normal NN startup process, fall back on a different
+    edit log if we see one that is corrupt (Colin Patrick McCabe via todd)
+
+    HDFS-3571. Allow EditLogFileInputStream to read from a remote URL (todd)
+
+    HDFS-4110. Refine a log printed in JNStorage. (Liang Xie via suresh)
+
+    HDFS-4153. Add START_MSG/SHUTDOWN_MSG for JournalNode. (liang xie via atm)
+
+    HDFS-3935. Add JournalNode to the start/stop scripts (Andy Isaacson via todd)
+
+    HDFS-4268. Remove redundant enum NNHAStatusHeartbeat.State. (shv)
+
+    HDFS-3680. Allow customized audit logging in HDFS FSNamesystem. (Marcelo
+    Vanzin via atm)
+
+    HDFS-4130. BKJM: The reading for editlog at NN starting using bkjm is not efficient.
+    (Han Xiao via umamahesh)
+
+    HDFS-4326. bump up Tomcat version for HttpFS to 6.0.36. (tucu)
 
   OPTIMIZATIONS
 
@@ -36,8 +169,279 @@ Release 2.0.3-alpha - Unreleased
     HDFS-3949. NameNodeRpcServer#join should join on both client and
     server RPC servers. (eli)
 
+    HDFS-3932. NameNode Web UI broken if the rpc-address is set to the wildcard.
+    (Colin Patrick McCabe via eli)
+
+    HDFS-3931. TestDatanodeBlockScanner#testBlockCorruptionPolicy2 is broken.
+    (Andy Isaacson via eli)
+
+    HDFS-3964. Make NN log of fs.defaultFS debug rather than info. (eli)
+
+    HDFS-3992. Method org.apache.hadoop.hdfs.TestHftpFileSystem.tearDown()
+    sometimes throws NPEs. (Ivan A. Veselovsky via atm)
+
+    HDFS-3753. Tests don't run with native libraries.
+    (Colin Patrick McCabe via eli)
+
+    HDFS-4000. TestParallelLocalRead fails with "input ByteBuffers
+    must be direct buffers". (Colin Patrick McCabe via eli)
+
+    HDFS-3999. HttpFS OPEN operation expects len parameter, it should be length. (tucu)
+
+    HDFS-4006. TestCheckpoint#testSecondaryHasVeryOutOfDateImage
+    occasionally fails due to unexpected exit. (todd via eli)
+
+    HDFS-4018. testMiniDFSClusterWithMultipleNN is missing some
+    cluster cleanup. (eli)
+
+    HDFS-4020. TestRBWBlockInvalidation may time out. (eli)
+
+    HDFS-4021. Misleading error message when resources are low on the NameNode.
+    (Christopher Conner via atm)
+
+    HDFS-4044. Duplicate ChecksumType definition in HDFS .proto files.
+    (Binglin Chang via suresh)
+
+    HDFS-4049. Fix hflush performance regression due to nagling delays
+    (todd)
+
+    HDFS-3678. Edit log files are never being purged from 2NN. (atm)
+
+    HDFS-4058. DirectoryScanner may fail with IOOB if the directory
+    scanning threads return out of volume order. (eli)
+
+    HDFS-3985. Add timeouts to TestMulitipleNNDataBlockScanner. (todd via eli)
+
+    HDFS-4061. TestBalancer and TestUnderReplicatedBlocks need timeouts. (eli)
+
+    HDFS-3997. OfflineImageViewer incorrectly passes value of imageVersion when
+    visiting IS_COMPRESSED element. (Mithun Radhakrishnan via atm)
+
+    HDFS-4055. TestAuditLogs is flaky. (Binglin Chang via eli)
+
+    HDFS-4072. On file deletion remove corresponding blocks pending
+    replications. (Jing Zhao via suresh)
+
+    HDFS-4022. Replication not happening for appended block. (Vinay via umamahesh)
+
+    HDFS-3948. Do not use hflush in TestWebHDFS.testNamenodeRestart() since the
+    out stream returned by WebHdfsFileSystem does not support it. (Jing Zhao
+    via szetszwo)
+
+    HDFS-3616. Fix a ConcurrentModificationException bug that BP actor threads
+    may not be shutdown properly in DataNode.  (Jing Zhao via szetszwo)
+
+    HDFS-4127. Log message is not correct in case of short of replica.
+    (Junping Du via suresh)
+
+    HADOOP-8994. TestDFSShell creates file named "noFileHere", making further
+    tests hard to understand (Andy Isaacson via daryn)
+
+    HDFS-3804.  TestHftpFileSystem fails intermittently with JDK7
+    (Trevor Robinson via daryn)
+
+    HDFS-4132. When libwebhdfs is not enabled, nativeMiniDfsClient frees
+    uninitialized memory (Colin Patrick McCabe via todd)
+
+    HDFS-1331. dfs -test should work like /bin/test (Andy Isaacson via daryn)
+
+    HDFS-3979. For hsync, datanode should wait for the local sync to complete
+    before sending ack. (Lars Hofhansl via szetszwo)
+
+    HDFS-3810. Implement format() for BKJM (Ivan Kelly via umamahesh)
+
+    HDFS-3625. Fix TestBackupNode by properly initializing edit log during
+    startup. (Junping Du via todd)
+
+    HDFS-4138. BackupNode startup fails due to uninitialized edit log.
+    (Kihwal Lee via shv)
+
+    HDFS-4162. Some malformed and unquoted HTML strings are returned from 
+    datanode web ui. (Darek Dagit via suresh)
+
+    HDFS-4164. fuse_dfs: add -lrt to the compiler command line on Linux.
+    (Colin Patrick McCabe via eli)
+
+    HDFS-3921. NN will prematurely consider blocks missing when entering active
+    state while still in safe mode. (atm)
+
+    HDFS-4106. BPServiceActor#lastHeartbeat, lastBlockReport and
+    lastDeletedReport should be volatile. (Jing Zhao via suresh)
+
+    HDFS-4139. fuse-dfs RO mode still allows file truncation.
+    (Colin Patrick McCabe via eli)    
+
+    HDFS-4104. dfs -test -d prints inappropriate error on nonexistent directory
+    (Andy Isaacson via daryn)
+
+    HDFS-3623. BKJM: zkLatchWaitTimeout hard coded to 6000. Make use of ZKSessionTimeout instead.
+    (umamahesh)
+
+    HDFS-3507. DFS#isInSafeMode needs to execute only on Active NameNode.
+    (Vinay via atm)
+
+    HDFS-4105. The SPNEGO user for secondary namenode should use the web
+    keytab. (Arpit Gupta via jitendra)
+
+    HDFS-4156. Seeking to a negative position should throw an IOE.
+    (Eli Reisman via eli)
+
+    HDFS-4171. WebHDFS and HttpFs should accept only valid Unix user 
+    names. (tucu)
+
+    HDFS-4178. Shell scripts should not close stderr (Andy Isaacson via daryn)
+
+    HDFS-4179. BackupNode: allow reads, fix checkpointing, safeMode. (shv)
+
+    HDFS-4216. Do not ignore QuotaExceededException when adding symlinks.
+    (szetszwo)
+
+    HDFS-4242. Map.Entry is incorrectly used in LeaseManager since the behavior
+    of it is undefined after the iteration or modifications of the map.
+    (szetszwo)
+
+    HDFS-4231. BackupNode: Introduce BackupState. (shv)
+
+    HDFS-4238. Standby namenode should not do purging of shared
+    storage edits. (todd)
+
+    HDFS-4282. TestEditLog.testFuzzSequences FAILED in all pre-commit test
+    (todd)
+
+    HDFS-4236. Remove artificial limit on username length introduced in
+    HDFS-4171. (tucu via suresh)
+
+    HDFS-4279. NameNode does not initialize generic conf keys when started
+    with -recover. (Colin Patrick McCabe via atm)
+
+    HDFS-4291. edit log unit tests leave stray test_edit_log_file around
+    (Colin Patrick McCabe via todd)
+
+    HDFS-4292. Sanity check not correct in RemoteBlockReader2.newBlockReader
+    (Binglin Chang via todd)
+
+    HDFS-4295. Using port 1023 should be valid when starting Secure DataNode
+    (Stephen Chu via todd)
+
+    HDFS-4294. Backwards compatibility is not maintained for TestVolumeId.
+    (Ivan A. Veselovsky and Robert Parker via atm)
+
+    HDFS-2264. NamenodeProtocol has the wrong value for clientPrincipal in
+    KerberosInfo annotation. (atm)
+
+    HDFS-4307. SocketCache should use monotonic time. (Colin Patrick McCabe
+    via atm)
+
+    HDFS-4315. DNs with multiple BPs can have BPOfferServices fail to start
+    due to unsynchronized map access. (atm)
+
+    HDFS-4140. fuse-dfs handles open(O_TRUNC) poorly. (Colin Patrick McCabe
+    via atm)
+
+  BREAKDOWN OF HDFS-3077 SUBTASKS
+
+    HDFS-3077. Quorum-based protocol for reading and writing edit logs.
+    (todd, Brandon Li, and Hari Mankude via todd)
+    
+    HDFS-3694. Fix getEditLogManifest to fetch httpPort if necessary (todd)
+    
+    HDFS-3692. Support purgeEditLogs() call to remotely purge logs on JNs
+    (todd)
+    
+    HDFS-3693. JNStorage should read its storage info even before a writer
+    becomes active (todd)
+    
+    HDFS-3725. Fix QJM startup when individual JNs have gaps (todd)
+    
+    HDFS-3741. Exhaustive failure injection test for skipped RPCs (todd)
+    
+    HDFS-3773. TestNNWithQJM fails after HDFS-3741. (atm)
+    
+    HDFS-3793. Implement genericized format() in QJM (todd)
+    
+    HDFS-3795. QJM: validate journal dir at startup (todd)
+    
+    HDFS-3798. Avoid throwing NPE when finalizeSegment() is called on invalid
+    segment (todd)
+    
+    HDFS-3799. QJM: handle empty log segments during recovery (todd)
+    
+    HDFS-3797. QJM: add segment txid as a parameter to journal() RPC (todd)
+    
+    HDFS-3800. improvements to QJM fault testing (todd)
+    
+    HDFS-3823. QJM: TestQJMWithFaults fails occasionally because of missed
+    setting of HTTP port. (todd and atm)
+    
+    HDFS-3826. QJM: Some trivial logging / exception text improvements. (todd
+    and atm)
+    
+    HDFS-3839. QJM: hadoop-daemon.sh should be updated to accept "journalnode"
+    (eli)
+    
+    HDFS-3845. Fixes for edge cases in QJM recovery protocol (todd)
+    
+    HDFS-3877. QJM: Provide defaults for dfs.journalnode.*address (eli)
+    
+    HDFS-3863. Track last "committed" txid in QJM (todd)
+    
+    HDFS-3869. Expose non-file journal manager details in web UI (todd)
+    
+    HDFS-3884. Journal format() should reset cached values (todd)
+    
+    HDFS-3870. Add metrics to JournalNode (todd)
+    
+    HDFS-3891. Make selectInputStreams throw IOE instead of RTE (todd)
+    
+    HDFS-3726. If a logger misses an RPC, don't retry that logger until next
+    segment (todd)
+    
+    HDFS-3893. QJM: Make QJM work with security enabled. (atm)
+    
+    HDFS-3897. QJM: TestBlockToken fails after HDFS-3893. (atm)
+    
+    HDFS-3898. QJM: enable TCP_NODELAY for IPC (todd)
+    
+    HDFS-3885. QJM: optimize log sync when JN is lagging behind (todd)
+    
+    HDFS-3900. QJM: avoid validating log segments on log rolls (todd)
+    
+    HDFS-3901. QJM: send 'heartbeat' messages to JNs even when they are
+    out-of-sync (todd)
+    
+    HDFS-3899. QJM: Add client-side metrics (todd)
+    
+    HDFS-3914. QJM: acceptRecovery should abort current segment (todd)
+    
+    HDFS-3915. QJM: Failover fails with auth error in secure cluster (todd)
+    
+    HDFS-3906. QJM: quorum timeout on failover with large log segment (todd)
+    
+    HDFS-3840. JournalNodes log JournalNotFormattedException backtrace error
+    before being formatted (todd)
+    
+    HDFS-3894. QJM: testRecoverAfterDoubleFailures can be flaky due to IPC
+    client caching (todd)
+    
+    HDFS-3926. QJM: Add user documentation for QJM. (atm)
+    
+    HDFS-3943. QJM: remove currently-unused md5sum field (todd)
+    
+    HDFS-3950. QJM: misc TODO cleanup, improved log messages, etc. (todd)
+    
+    HDFS-3955. QJM: Make acceptRecovery() atomic. (todd)
+    
+    HDFS-3956. QJM: purge temporary files when no longer within retention
+    period (todd)
+    
+    HDFS-4004. TestJournalNode#testJournal fails because of test case execution
+    order (Chao Shi via todd)
+    
+    HDFS-4017. Unclosed FileInputStream in GetJournalEditServlet
+    (Chao Shi via todd)
+
 Release 2.0.2-alpha - 2012-09-07 
-  
+
   INCOMPATIBLE CHANGES
 
     HDFS-3446. HostsFileReader silently ignores bad includes/excludes
@@ -66,6 +470,10 @@ Release 2.0.2-alpha - 2012-09-07
 
     HDFS-2793. Add an admin command to trigger an edit log roll. (todd)
 
+    HDFS-3703. Datanodes are marked stale if heartbeat is not received in
+    configured timeout and are selected as the last location to read from.
+    (Jing Zhao via suresh)
+    
   IMPROVEMENTS
 
     HDFS-3040. TestMulitipleNNDataBlockScanner is misspelled. (Madhukara Phatak
@@ -292,6 +700,9 @@ Release 2.0.2-alpha - 2012-09-07
     to avoid partial edits case disk out of space. (Colin McCabe via todd)
 
     HDFS-3910. DFSTestUtil#waitReplication should timeout. (eli)
+    
+    HDFS-3920. libwebdhfs string processing and using strerror consistently
+    to handle all errors. (Jing Zhao via suresh)
 
   OPTIMIZATIONS
 
@@ -620,6 +1031,8 @@ Release 2.0.2-alpha - 2012-09-07
     HDFS-3938. remove current limitations from HttpFS docs. (tucu)
 
     HDFS-3944. Httpfs resolveAuthority() is not resolving host correctly. (tucu)
+
+    HDFS-3972. Trash emptier fails in secure HA cluster. (todd via eli)
  
   BREAKDOWN OF HDFS-3042 SUBTASKS
 
@@ -1478,7 +1891,7 @@ Release 2.0.0-alpha - 05-23-2012
     
     HDFS-3039. Address findbugs and javadoc warnings on branch. (todd via atm)
 
-Release 0.23.4 - UNRELEASED
+Release 0.23.6 - UNRELEASED
 
   INCOMPATIBLE CHANGES
 
@@ -1490,7 +1903,69 @@ Release 0.23.4 - UNRELEASED
 
   BUG FIXES
 
-Release 0.23.3 - UNRELEASED
+    HDFS-4247. saveNamespace should be tolerant of dangling lease (daryn)
+
+    HDFS-4248. Renaming directories may incorrectly remove the paths in leases
+    under the tree.  (daryn via szetszwo)
+
+Release 0.23.5 - UNRELEASED
+
+  INCOMPATIBLE CHANGES
+
+    HDFS-4080. Add a separate logger for block state change logs to enable turning
+    off those logs. (Kihwal Lee via suresh)
+
+  NEW FEATURES
+
+  IMPROVEMENTS
+
+  OPTIMIZATIONS
+
+    HDFS-4075. Reduce recommissioning overhead (Kihwal Lee via daryn)
+
+    HDFS-3990.  NN's health report has severe performance problems (daryn)
+
+    HDFS-4181.  LeaseManager tries to double remove and prints extra messages
+    (Kihwal Lee via daryn)
+
+  BUG FIXES
+
+    HDFS-3829. TestHftpURLTimeouts fails intermittently with JDK7  (Trevor
+    Robinson via tgraves)
+
+    HDFS-3824. TestHftpDelegationToken fails intermittently with JDK7 (Trevor
+    Robinson via tgraves)
+
+    HDFS-3224. Bug in check for DN re-registration with different storage ID
+    (jlowe)
+
+    HDFS-4090. getFileChecksum() result incompatible when called against
+    zero-byte files. (Kihwal Lee via daryn)
+
+    HDFS-4172. namenode does not URI-encode parameters when building URI for
+    datanode request (Derek Dagit via bobby)
+
+    HDFS-4182. SecondaryNameNode leaks NameCache entries (bobby)
+
+    HDFS-4186. logSync() is called with the write lock held while releasing
+    lease (Kihwal Lee via daryn)
+
+Release 0.23.4
+
+  INCOMPATIBLE CHANGES
+
+  NEW FEATURES
+
+  IMPROVEMENTS
+
+  OPTIMIZATIONS
+
+  BUG FIXES
+
+    HDFS-3831. Failure to renew tokens due to test-sources left in classpath
+    (jlowe via bobby)
+
+Release 0.23.3
 
   INCOMPATIBLE CHANGES
 

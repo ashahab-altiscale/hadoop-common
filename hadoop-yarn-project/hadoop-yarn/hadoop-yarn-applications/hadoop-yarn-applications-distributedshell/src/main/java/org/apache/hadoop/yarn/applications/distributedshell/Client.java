@@ -119,7 +119,8 @@ public class Client extends YarnClientImpl {
   // Application master jar file
   private String appMasterJar = ""; 
   // Main class to invoke application master
-  private String appMasterMainClass = "";
+  private final String appMasterMainClass =
+      "org.apache.hadoop.yarn.applications.distributedshell.ApplicationMaster";
 
   // Shell command to be executed 
   private String shellCommand = ""; 
@@ -149,6 +150,9 @@ public class Client extends YarnClientImpl {
   // Debug flag
   boolean debugFlag = false;	
 
+  // Command line options
+  private Options opts;
+
   /**
    * @param args Command line arguments 
    */
@@ -157,9 +161,15 @@ public class Client extends YarnClientImpl {
     try {
       Client client = new Client();
       LOG.info("Initializing Client");
-      boolean doRun = client.init(args);
-      if (!doRun) {
-        System.exit(0);
+      try {
+        boolean doRun = client.init(args);
+        if (!doRun) {
+          System.exit(0);
+        }
+      } catch (IllegalArgumentException e) {
+        System.err.println(e.getLocalizedMessage());
+        client.printUsage();
+        System.exit(-1);
       }
       result = client.run();
     } catch (Throwable t) {
@@ -180,6 +190,23 @@ public class Client extends YarnClientImpl {
     super();
     this.conf = conf;
     init(conf);
+    opts = new Options();
+    opts.addOption("appname", true, "Application Name. Default value - DistributedShell");
+    opts.addOption("priority", true, "Application Priority. Default 0");
+    opts.addOption("queue", true, "RM Queue in which this application is to be submitted");
+    opts.addOption("timeout", true, "Application timeout in milliseconds");
+    opts.addOption("master_memory", true, "Amount of memory in MB to be requested to run the application master");
+    opts.addOption("jar", true, "Jar file containing the application master");
+    opts.addOption("shell_command", true, "Shell command to be executed by the Application Master");
+    opts.addOption("shell_script", true, "Location of the shell script to be executed");
+    opts.addOption("shell_args", true, "Command line args for the shell script");
+    opts.addOption("shell_env", true, "Environment for shell script. Specified as env_key=env_val pairs");
+    opts.addOption("shell_cmd_priority", true, "Priority for the shell command containers");
+    opts.addOption("container_memory", true, "Amount of memory in MB to be requested to run the shell command");
+    opts.addOption("num_containers", true, "No. of containers on which the shell command needs to be executed");
+    opts.addOption("log_properties", true, "log4j.properties file");
+    opts.addOption("debug", false, "Dump out debug information");
+    opts.addOption("help", false, "Print usage");
   }
 
   /**
@@ -192,7 +219,7 @@ public class Client extends YarnClientImpl {
    * Helper function to print out usage
    * @param opts Parsed command line options 
    */
-  private void printUsage(Options opts) {
+  private void printUsage() {
     new HelpFormatter().printHelp("Client", opts);
   }
 
@@ -204,33 +231,14 @@ public class Client extends YarnClientImpl {
    */
   public boolean init(String[] args) throws ParseException {
 
-    Options opts = new Options();
-    opts.addOption("appname", true, "Application Name. Default value - DistributedShell");
-    opts.addOption("priority", true, "Application Priority. Default 0");
-    opts.addOption("queue", true, "RM Queue in which this application is to be submitted");
-    opts.addOption("timeout", true, "Application timeout in milliseconds");
-    opts.addOption("master_memory", true, "Amount of memory in MB to be requested to run the application master");
-    opts.addOption("jar", true, "Jar file containing the application master");
-    opts.addOption("class", true, "Main class to  be run for the Application Master.");
-    opts.addOption("shell_command", true, "Shell command to be executed by the Application Master");
-    opts.addOption("shell_script", true, "Location of the shell script to be executed");
-    opts.addOption("shell_args", true, "Command line args for the shell script");
-    opts.addOption("shell_env", true, "Environment for shell script. Specified as env_key=env_val pairs");
-    opts.addOption("shell_cmd_priority", true, "Priority for the shell command containers");		
-    opts.addOption("container_memory", true, "Amount of memory in MB to be requested to run the shell command");
-    opts.addOption("num_containers", true, "No. of containers on which the shell command needs to be executed");
-    opts.addOption("log_properties", true, "log4j.properties file");
-    opts.addOption("debug", false, "Dump out debug information");
-    opts.addOption("help", false, "Print usage");
     CommandLine cliParser = new GnuParser().parse(opts, args);
 
     if (args.length == 0) {
-      printUsage(opts);
       throw new IllegalArgumentException("No args specified for client to initialize");
     }		
 
     if (cliParser.hasOption("help")) {
-      printUsage(opts);
+      printUsage();
       return false;
     }
 
@@ -254,8 +262,6 @@ public class Client extends YarnClientImpl {
     }		
 
     appMasterJar = cliParser.getOptionValue("jar");
-    appMasterMainClass = cliParser.getOptionValue("class",
-        "org.apache.hadoop.yarn.applications.distributedshell.ApplicationMaster");		
 
     if (!cliParser.hasOption("shell_command")) {
       throw new IllegalArgumentException("No shell command specified to be executed by application master");
@@ -488,9 +494,10 @@ public class Client extends YarnClientImpl {
     classPathEnv.append(":./log4j.properties");
 
     // add the runtime classpath needed for tests to work
-    String testRuntimeClassPath = Client.getTestRuntimeClasspath();
-    classPathEnv.append(':');
-    classPathEnv.append(testRuntimeClassPath);
+    if (conf.getBoolean(YarnConfiguration.IS_MINI_YARN_CLUSTER, false)) {
+      classPathEnv.append(':');
+      classPathEnv.append(System.getProperty("java.class.path"));
+    }
 
     env.put("CLASSPATH", classPathEnv.toString());
 
@@ -656,51 +663,5 @@ public class Client extends YarnClientImpl {
     // throws an exception in case of failures
     super.killApplication(appId);	
   }
-
-  private static String getTestRuntimeClasspath() {
-
-    InputStream classpathFileStream = null;
-    BufferedReader reader = null;
-    String envClassPath = "";
-
-    LOG.info("Trying to generate classpath for app master from current thread's classpath");
-    try {
-
-      // Create classpath from generated classpath
-      // Check maven ppom.xml for generated classpath info
-      // Works if compile time env is same as runtime. Mainly tests.
-      ClassLoader thisClassLoader =
-          Thread.currentThread().getContextClassLoader();
-      String generatedClasspathFile = "yarn-apps-ds-generated-classpath";
-      classpathFileStream =
-          thisClassLoader.getResourceAsStream(generatedClasspathFile);
-      if (classpathFileStream == null) {
-        LOG.info("Could not classpath resource from class loader");
-        return envClassPath;
-      }
-      LOG.info("Readable bytes from stream=" + classpathFileStream.available());
-      reader = new BufferedReader(new InputStreamReader(classpathFileStream));
-      String cp = reader.readLine();
-      if (cp != null) {
-        envClassPath += cp.trim() + ":";
-      }
-      // Put the file itself on classpath for tasks.
-      envClassPath += thisClassLoader.getResource(generatedClasspathFile).getFile();
-    } catch (IOException e) {
-      LOG.info("Could not find the necessary resource to generate class path for tests. Error=" + e.getMessage());
-    } 
-
-    try {
-      if (classpathFileStream != null) {
-        classpathFileStream.close();
-      }
-      if (reader != null) {
-        reader.close();
-      }
-    } catch (IOException e) {
-      LOG.info("Failed to close class path file stream or reader. Error=" + e.getMessage());
-    } 
-    return envClassPath;
-  }			
 
 }

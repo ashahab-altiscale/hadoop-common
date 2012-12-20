@@ -40,12 +40,14 @@ import org.apache.hadoop.hdfs.security.token.delegation.DelegationTokenIdentifie
 import static org.apache.hadoop.util.ExitUtil.terminate;
 
 import org.apache.hadoop.hdfs.server.common.HdfsServerConstants.NamenodeRole;
+import org.apache.hadoop.hdfs.server.common.Storage.FormatConfirmable;
 import org.apache.hadoop.hdfs.server.common.Storage.StorageDirectory;
 import org.apache.hadoop.hdfs.server.namenode.FSEditLogOp.*;
 import org.apache.hadoop.hdfs.server.namenode.JournalSet.JournalAndStream;
 import org.apache.hadoop.hdfs.server.namenode.NNStorage.NameNodeDirType;
 import org.apache.hadoop.hdfs.server.namenode.metrics.NameNodeMetrics;
 import org.apache.hadoop.hdfs.server.protocol.NamenodeRegistration;
+import org.apache.hadoop.hdfs.server.protocol.NamespaceInfo;
 import org.apache.hadoop.hdfs.server.protocol.RemoteEditLogManifest;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.security.token.delegation.DelegationKey;
@@ -61,7 +63,7 @@ import com.google.common.collect.Lists;
  */
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
-public class FSEditLog  {
+public class FSEditLog implements LogsPurgeable {
 
   static final Log LOG = LogFactory.getLog(FSEditLog.class);
 
@@ -301,7 +303,7 @@ public class FSEditLog  {
       endCurrentLogSegment(true);
     }
     
-    if (!journalSet.isEmpty()) {
+    if (journalSet != null && !journalSet.isEmpty()) {
       try {
         journalSet.close();
       } catch (IOException ioe) {
@@ -310,6 +312,39 @@ public class FSEditLog  {
     }
 
     state = State.CLOSED;
+  }
+
+
+  /**
+   * Format all configured journals which are not file-based.
+   * 
+   * File-based journals are skipped, since they are formatted by the
+   * Storage format code.
+   */
+  void formatNonFileJournals(NamespaceInfo nsInfo) throws IOException {
+    Preconditions.checkState(state == State.BETWEEN_LOG_SEGMENTS,
+        "Bad state: %s", state);
+    
+    for (JournalManager jm : journalSet.getJournalManagers()) {
+      if (!(jm instanceof FileJournalManager)) {
+        jm.format(nsInfo);
+      }
+    }
+  }
+  
+  List<FormatConfirmable> getFormatConfirmables() {
+    Preconditions.checkState(state == State.BETWEEN_LOG_SEGMENTS,
+        "Bad state: %s", state);
+
+    List<FormatConfirmable> ret = Lists.newArrayList();
+    for (final JournalManager jm : journalSet.getJournalManagers()) {
+      // The FJMs are confirmed separately since they are also
+      // StorageDirectories
+      if (!(jm instanceof FileJournalManager)) {
+        ret.add(jm);
+      }
+    }
+    return ret;
   }
 
   /**
@@ -602,7 +637,7 @@ public class FSEditLog  {
   public void logOpenFile(String path, INodeFileUnderConstruction newNode) {
     AddOp op = AddOp.getInstance(cache.get())
       .setPath(path)
-      .setReplication(newNode.getReplication())
+      .setReplication(newNode.getBlockReplication())
       .setModificationTime(newNode.getModificationTime())
       .setAccessTime(newNode.getAccessTime())
       .setBlockSize(newNode.getPreferredBlockSize())
@@ -620,7 +655,7 @@ public class FSEditLog  {
   public void logCloseFile(String path, INodeFile newNode) {
     CloseOp op = CloseOp.getInstance(cache.get())
       .setPath(path)
-      .setReplication(newNode.getReplication())
+      .setReplication(newNode.getBlockReplication())
       .setModificationTime(newNode.getModificationTime())
       .setAccessTime(newNode.getAccessTime())
       .setBlockSize(newNode.getPreferredBlockSize())
@@ -823,6 +858,11 @@ public class FSEditLog  {
     return journalSet;
   }
   
+  @VisibleForTesting
+  synchronized void setJournalSetForTesting(JournalSet js) {
+    this.journalSet = js;
+  }
+  
   /**
    * Used only by tests.
    */
@@ -845,7 +885,7 @@ public class FSEditLog  {
    * in the new log.
    */
   synchronized long rollEditLog() throws IOException {
-    LOG.info("Rolling edit logs.");
+    LOG.info("Rolling edit logs");
     endCurrentLogSegment(true);
     
     long nextTxId = getLastWrittenTxId() + 1;
@@ -943,13 +983,26 @@ public class FSEditLog  {
 
   /**
    * Archive any log files that are older than the given txid.
+   * 
+   * If the edit log is not open for write, then this call returns with no
+   * effect.
    */
+  @Override
   public synchronized void purgeLogsOlderThan(final long minTxIdToKeep) {
+    // Should not purge logs unless they are open for write.
+    // This prevents the SBN from purging logs on shared storage, for example.
+    if (!isOpenForWrite()) {
+      return;
+    }
+    
     assert curSegmentTxId == HdfsConstants.INVALID_TXID || // on format this is no-op
       minTxIdToKeep <= curSegmentTxId :
       "cannot purge logs older than txid " + minTxIdToKeep +
       " when current segment starts at " + curSegmentTxId;
-
+    if (minTxIdToKeep == 0) {
+      return;
+    }
+    
     // This could be improved to not need synchronization. But currently,
     // journalSet is not threadsafe, so we need to synchronize this method.
     try {
@@ -1068,7 +1121,13 @@ public class FSEditLog  {
       journalSet.recoverUnfinalizedSegments();
     } catch (IOException ex) {
       // All journals have failed, it is handled in logSync.
+      // TODO: are we sure this is OK?
     }
+  }
+  
+  public void selectInputStreams(Collection<EditLogInputStream> streams,
+      long fromTxId, boolean inProgressOk) throws IOException {
+    journalSet.selectInputStreams(streams, fromTxId, inProgressOk);
   }
 
   public Collection<EditLogInputStream> selectInputStreams(
@@ -1087,7 +1146,7 @@ public class FSEditLog  {
       long fromTxId, long toAtLeastTxId, MetaRecoveryContext recovery,
       boolean inProgressOk) throws IOException {
     List<EditLogInputStream> streams = new ArrayList<EditLogInputStream>();
-    journalSet.selectInputStreams(streams, fromTxId, inProgressOk);
+    selectInputStreams(streams, fromTxId, inProgressOk);
 
     try {
       checkForGaps(streams, fromTxId, toAtLeastTxId, inProgressOk);
@@ -1100,18 +1159,6 @@ public class FSEditLog  {
         closeAllStreams(streams);
         throw e;
       }
-    }
-    // This code will go away as soon as RedundantEditLogInputStream is
-    // introduced. (HDFS-3049)
-    try {
-      if (!streams.isEmpty()) {
-        streams.get(0).skipUntil(fromTxId);
-      }
-    } catch (IOException e) {
-      // We don't want to throw an exception from here, because that would make
-      // recovery impossible even if the user requested it.  An exception will
-      // be thrown later, when we don't read the starting txid we expect.
-      LOG.error("error skipping until transaction " + fromTxId, e);
     }
     return streams;
   }
@@ -1200,8 +1247,9 @@ public class FSEditLog  {
 
     try {
       Constructor<? extends JournalManager> cons
-        = clazz.getConstructor(Configuration.class, URI.class);
-      return cons.newInstance(conf, uri);
+        = clazz.getConstructor(Configuration.class, URI.class,
+            NamespaceInfo.class);
+      return cons.newInstance(conf, uri, storage.getNamespaceInfo());
     } catch (Exception e) {
       throw new IllegalArgumentException("Unable to construct journal, "
                                          + uri, e);

@@ -507,9 +507,9 @@ public class ClientNamenodeProtocolTranslatorPB implements
   }
 
   @Override
-  public boolean setSafeMode(SafeModeAction action) throws IOException {
-    SetSafeModeRequestProto req = SetSafeModeRequestProto.newBuilder().
-        setAction(PBHelper.convert(action)).build();
+  public boolean setSafeMode(SafeModeAction action, boolean isChecked) throws IOException {
+    SetSafeModeRequestProto req = SetSafeModeRequestProto.newBuilder()
+        .setAction(PBHelper.convert(action)).setChecked(isChecked).build();
     try {
       return rpcProxy.setSafeMode(null, req).getResult();
     } catch (ServiceException e) {
@@ -659,12 +659,11 @@ public class ClientNamenodeProtocolTranslatorPB implements
   }
 
   @Override
-  public void fsync(String src, String client) throws AccessControlException,
-      FileNotFoundException, UnresolvedLinkException, IOException {
-    FsyncRequestProto req = FsyncRequestProto.newBuilder()
-        .setSrc(src)
-        .setClient(client)
-        .build();
+  public void fsync(String src, String client, long lastBlockLength)
+      throws AccessControlException, FileNotFoundException,
+      UnresolvedLinkException, IOException {
+    FsyncRequestProto req = FsyncRequestProto.newBuilder().setSrc(src)
+        .setClient(client).setLastBlockLength(lastBlockLength).build();
     try {
       rpcProxy.fsync(null, req);
     } catch (ServiceException e) {

@@ -126,7 +126,7 @@ public class FSImageSerialization {
                                            String path) 
                                            throws IOException {
     writeString(path, out);
-    out.writeShort(cons.getReplication());
+    out.writeShort(cons.getBlockReplication());
     out.writeLong(cons.getModificationTime());
     out.writeLong(cons.getPreferredBlockSize());
     int nrBlocks = cons.getBlocks().length;
@@ -162,7 +162,7 @@ public class FSImageSerialization {
       PermissionStatus.write(out, node.getUserName(),
                              node.getGroupName(),
                              filePerm);
-    } else if (node.isLink()) {
+    } else if (node.isSymlink()) {
       out.writeShort(0);  // replication
       out.writeLong(0);   // modification time
       out.writeLong(0);   // access time
@@ -175,7 +175,7 @@ public class FSImageSerialization {
                              filePerm);      
     } else {
       INodeFile fileINode = (INodeFile)node;
-      out.writeShort(fileINode.getReplication());
+      out.writeShort(fileINode.getBlockReplication());
       out.writeLong(fileINode.getModificationTime());
       out.writeLong(fileINode.getAccessTime());
       out.writeLong(fileINode.getPreferredBlockSize());
@@ -197,7 +197,7 @@ public class FSImageSerialization {
   public static String readString(DataInputStream in) throws IOException {
     DeprecatedUTF8 ustr = TL_DATA.get().U_STR;
     ustr.readFields(in);
-    return ustr.toString();
+    return ustr.toStringChecked();
   }
 
   static String readString_EmptyAsNull(DataInputStream in) throws IOException {

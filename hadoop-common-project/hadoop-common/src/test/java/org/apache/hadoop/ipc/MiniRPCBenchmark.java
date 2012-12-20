@@ -30,7 +30,6 @@ import junit.framework.Assert;
 
 import org.apache.commons.logging.impl.Log4JLogger;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.CommonConfigurationKeys;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.KerberosInfo;
@@ -165,8 +164,10 @@ public class MiniRPCBenchmark {
         new TestDelegationTokenSecretManager(24*60*60*1000,
             7*24*60*60*1000,24*60*60*1000,3600000);
       secretManager.startThreads();
-      rpcServer = RPC.getServer(MiniProtocol.class,
-          this, DEFAULT_SERVER_ADDRESS, 0, 1, false, conf, secretManager);
+      rpcServer = new RPC.Builder(conf).setProtocol(MiniProtocol.class)
+          .setInstance(this).setBindAddress(DEFAULT_SERVER_ADDRESS).setPort(0)
+          .setNumHandlers(1).setVerbose(false).setSecretManager(secretManager)
+          .build();
       rpcServer.start();
     }
 
@@ -378,9 +379,7 @@ public class MiniRPCBenchmark {
       elapsedTime = mb.runMiniBenchmarkWithDelegationToken(
                               conf, count, KEYTAB_FILE_KEY, USER_NAME_KEY);
     } else {
-      String auth = 
-        conf.get(CommonConfigurationKeys.HADOOP_SECURITY_AUTHENTICATION, 
-                        "simple");
+      String auth = SecurityUtil.getAuthenticationMethod(conf).toString();
       System.out.println(
           "Running MiniRPCBenchmark with " + auth + " authentication.");
       elapsedTime = mb.runMiniBenchmark(

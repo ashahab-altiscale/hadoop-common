@@ -16,6 +16,8 @@
  */
 package org.apache.hadoop.security;
 
+import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.HADOOP_SECURITY_AUTHENTICATION;
+
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -25,6 +27,7 @@ import java.net.URLConnection;
 import java.net.UnknownHostException;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.security.PrivilegedExceptionAction;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ServiceLoader;
@@ -43,6 +46,7 @@ import org.apache.hadoop.fs.CommonConfigurationKeys;
 import org.apache.hadoop.http.HttpConfig;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.net.NetUtils;
+import org.apache.hadoop.security.UserGroupInformation.AuthenticationMethod;
 import org.apache.hadoop.security.authentication.client.AuthenticatedURL;
 import org.apache.hadoop.security.authentication.client.AuthenticationException;
 import org.apache.hadoop.security.ssl.SSLFactory;
@@ -451,6 +455,41 @@ public class SecurityUtil {
       return action.run();
     }
   }
+  
+  /**
+   * Perform the given action as the daemon's login user. If an
+   * InterruptedException is thrown, it is converted to an IOException.
+   *
+   * @param action the action to perform
+   * @return the result of the action
+   * @throws IOException in the event of error
+   */
+  public static <T> T doAsLoginUser(PrivilegedExceptionAction<T> action)
+      throws IOException {
+    return doAsUser(UserGroupInformation.getLoginUser(), action);
+  }
+
+  /**
+   * Perform the given action as the daemon's current user. If an
+   * InterruptedException is thrown, it is converted to an IOException.
+   *
+   * @param action the action to perform
+   * @return the result of the action
+   * @throws IOException in the event of error
+   */
+  public static <T> T doAsCurrentUser(PrivilegedExceptionAction<T> action)
+      throws IOException {
+    return doAsUser(UserGroupInformation.getCurrentUser(), action);
+  }
+
+  private static <T> T doAsUser(UserGroupInformation ugi,
+      PrivilegedExceptionAction<T> action) throws IOException {
+    try {
+      return ugi.doAs(action);
+    } catch (InterruptedException ie) {
+      throw new IOException(ie);
+    }
+  }
 
   /**
    * Open a (if need be) secure connection to a URL in a secure environment
@@ -463,7 +502,7 @@ public class SecurityUtil {
    * @throws IOException If unable to authenticate via SPNEGO
    */
   public static URLConnection openSecureHttpConnection(URL url) throws IOException {
-    if(!UserGroupInformation.isSecurityEnabled()) {
+    if (!HttpConfig.isSecure() && !UserGroupInformation.isSecurityEnabled()) {
       return url.openConnection();
     }
 
@@ -629,4 +668,22 @@ public class SecurityUtil {
     }
   }
 
+  public static AuthenticationMethod getAuthenticationMethod(Configuration conf) {
+    String value = conf.get(HADOOP_SECURITY_AUTHENTICATION, "simple");
+    try {
+      return Enum.valueOf(AuthenticationMethod.class, value.toUpperCase());
+    } catch (IllegalArgumentException iae) {
+      throw new IllegalArgumentException("Invalid attribute value for " +
+          HADOOP_SECURITY_AUTHENTICATION + " of " + value);
+    }
+  }
+
+  public static void setAuthenticationMethod(
+      AuthenticationMethod authenticationMethod, Configuration conf) {
+    if (authenticationMethod == null) {
+      authenticationMethod = AuthenticationMethod.SIMPLE;
+    }
+    conf.set(HADOOP_SECURITY_AUTHENTICATION,
+             authenticationMethod.toString().toLowerCase());
+  }
 }

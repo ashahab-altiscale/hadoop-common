@@ -31,18 +31,18 @@ import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.Priority;
 import org.apache.hadoop.yarn.api.records.QueueInfo;
 import org.apache.hadoop.yarn.api.records.Resource;
+import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.event.AsyncDispatcher;
 import org.apache.hadoop.yarn.server.resourcemanager.Application;
 import org.apache.hadoop.yarn.server.resourcemanager.RMContext;
 import org.apache.hadoop.yarn.server.resourcemanager.RMContextImpl;
 import org.apache.hadoop.yarn.server.resourcemanager.ResourceManager;
 import org.apache.hadoop.yarn.server.resourcemanager.Task;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.Store;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.StoreFactory;
 import org.apache.hadoop.yarn.server.resourcemanager.resource.Resources;
 import org.apache.hadoop.yarn.server.resourcemanager.resourcetracker.InlineDispatcher;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNode;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.QueueMetrics;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ResourceScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.AppAddedSchedulerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.SchedulerEvent;
 import org.apache.hadoop.yarn.util.BuilderUtils;
@@ -57,9 +57,11 @@ public class TestFifoScheduler {
   
   @Before
   public void setUp() throws Exception {
-    Store store = StoreFactory.getStore(new Configuration());
-    resourceManager = new ResourceManager(store);
-    resourceManager.init(new Configuration());
+    resourceManager = new ResourceManager();
+    Configuration conf = new Configuration();
+    conf.setClass(YarnConfiguration.RM_SCHEDULER, 
+        FifoScheduler.class, ResourceScheduler.class);
+    resourceManager.init(conf);
   }
 
   @After
@@ -86,8 +88,8 @@ public class TestFifoScheduler {
   @Test
   public void testAppAttemptMetrics() throws Exception {
     AsyncDispatcher dispatcher = new InlineDispatcher();
-    RMContext rmContext = new RMContextImpl(null, dispatcher, null,
-        null, null, null, null, null);
+    RMContext rmContext = new RMContextImpl(dispatcher, null,
+        null, null, null, null, null, null);
 
     FifoScheduler schedular = new FifoScheduler();
     schedular.reinitialize(new Configuration(), rmContext);

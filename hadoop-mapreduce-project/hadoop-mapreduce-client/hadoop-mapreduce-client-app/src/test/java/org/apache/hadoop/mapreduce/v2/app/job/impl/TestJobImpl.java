@@ -27,6 +27,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -44,6 +45,7 @@ import org.apache.hadoop.mapreduce.split.JobSplit.TaskSplitMetaInfo;
 import org.apache.hadoop.mapreduce.v2.api.records.JobId;
 import org.apache.hadoop.mapreduce.v2.api.records.JobState;
 import org.apache.hadoop.mapreduce.v2.api.records.TaskId;
+import org.apache.hadoop.mapreduce.v2.app.job.JobStateInternal;
 import org.apache.hadoop.mapreduce.v2.app.job.Task;
 import org.apache.hadoop.mapreduce.v2.app.job.event.JobDiagnosticsUpdateEvent;
 import org.apache.hadoop.mapreduce.v2.app.job.event.JobEvent;
@@ -51,10 +53,14 @@ import org.apache.hadoop.mapreduce.v2.app.job.event.JobEventType;
 import org.apache.hadoop.mapreduce.v2.app.job.impl.JobImpl.InitTransition;
 import org.apache.hadoop.mapreduce.v2.app.job.impl.JobImpl.JobNoTasksCompletedTransition;
 import org.apache.hadoop.mapreduce.v2.app.metrics.MRAppMetrics;
+import org.apache.hadoop.security.Credentials;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.yarn.SystemClock;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.event.EventHandler;
+import org.apache.hadoop.yarn.server.resourcemanager.resourcetracker.InlineDispatcher;
+import org.apache.hadoop.yarn.state.StateMachine;
+import org.apache.hadoop.yarn.state.StateMachineFactory;
 import org.apache.hadoop.yarn.util.Records;
 import org.junit.Assert;
 import org.junit.Test;
@@ -77,11 +83,11 @@ public class TestJobImpl {
     tasks.put(mockTask.getID(), mockTask);
     mockJob.tasks = tasks;
 
-    when(mockJob.getState()).thenReturn(JobState.ERROR);
+    when(mockJob.getInternalState()).thenReturn(JobStateInternal.ERROR);
     JobEvent mockJobEvent = mock(JobEvent.class);
-    JobState state = trans.transition(mockJob, mockJobEvent);
+    JobStateInternal state = trans.transition(mockJob, mockJobEvent);
     Assert.assertEquals("Incorrect state returned from JobNoTasksCompletedTransition",
-        JobState.ERROR, state);
+        JobStateInternal.ERROR, state);
   }
 
   @Test
@@ -96,9 +102,12 @@ public class TestJobImpl {
     when(mockJob.getCommitter()).thenReturn(mockCommitter);
     when(mockJob.getEventHandler()).thenReturn(mockEventHandler);
     when(mockJob.getJobContext()).thenReturn(mockJobContext);
-    when(mockJob.finished(JobState.KILLED)).thenReturn(JobState.KILLED);
-    when(mockJob.finished(JobState.FAILED)).thenReturn(JobState.FAILED);
-    when(mockJob.finished(JobState.SUCCEEDED)).thenReturn(JobState.SUCCEEDED);
+    when(mockJob.finished(JobStateInternal.KILLED)).thenReturn(
+        JobStateInternal.KILLED);
+    when(mockJob.finished(JobStateInternal.FAILED)).thenReturn(
+        JobStateInternal.FAILED);
+    when(mockJob.finished(JobStateInternal.SUCCEEDED)).thenReturn(
+        JobStateInternal.SUCCEEDED);
 
     try {
       doThrow(new IOException()).when(mockCommitter).commitJob(any(JobContext.class));
@@ -106,11 +115,11 @@ public class TestJobImpl {
       // commitJob stubbed out, so this can't happen
     }
     doNothing().when(mockEventHandler).handle(any(JobHistoryEvent.class));
-    JobState jobState = JobImpl.checkJobCompleteSuccess(mockJob);
+    JobStateInternal jobState = JobImpl.checkJobCompleteSuccess(mockJob);
     Assert.assertNotNull("checkJobCompleteSuccess incorrectly returns null " +
       "for successful job", jobState);
     Assert.assertEquals("checkJobCompleteSuccess returns incorrect state",
-        JobState.FAILED, jobState);
+        JobStateInternal.FAILED, jobState);
     verify(mockJob).abortJob(
         eq(org.apache.hadoop.mapreduce.JobStatus.State.FAILED));
   }
@@ -129,7 +138,8 @@ public class TestJobImpl {
     when(mockJob.getJobContext()).thenReturn(mockJobContext);
     doNothing().when(mockJob).setFinishTime();
     doNothing().when(mockJob).logJobHistoryFinishedEvent();
-    when(mockJob.finished(any(JobState.class))).thenReturn(JobState.SUCCEEDED);
+    when(mockJob.finished(any(JobStateInternal.class))).thenReturn(
+        JobStateInternal.SUCCEEDED);
 
     try {
       doNothing().when(mockCommitter).commitJob(any(JobContext.class));
@@ -141,7 +151,7 @@ public class TestJobImpl {
       "for successful job",
       JobImpl.checkJobCompleteSuccess(mockJob));
     Assert.assertEquals("checkJobCompleteSuccess returns incorrect state",
-        JobState.SUCCEEDED, JobImpl.checkJobCompleteSuccess(mockJob));
+        JobStateInternal.SUCCEEDED, JobImpl.checkJobCompleteSuccess(mockJob));
   }
 
   @Test
@@ -336,7 +346,7 @@ public class TestJobImpl {
     return isUber;
   }
 
-  private InitTransition getInitTransition() {
+  private static InitTransition getInitTransition() {
     InitTransition initTransition = new InitTransition() {
       @Override
       protected TaskSplitMetaInfo[] createSplits(JobImpl job, JobId jobId) {
@@ -345,5 +355,64 @@ public class TestJobImpl {
       }
     };
     return initTransition;
+  }
+
+  @Test
+  public void testTransitionsAtFailed() throws IOException {
+    Configuration conf = new Configuration();
+    JobID jobID = JobID.forName("job_1234567890000_0001");
+    JobId jobId = TypeConverter.toYarn(jobID);
+    OutputCommitter committer = mock(OutputCommitter.class);
+    doThrow(new IOException("forcefail"))
+      .when(committer).setupJob(any(JobContext.class));
+    InlineDispatcher dispatcher = new InlineDispatcher();
+    JobImpl job = new StubbedJob(jobId, Records
+        .newRecord(ApplicationAttemptId.class), conf,
+        dispatcher.getEventHandler(), committer, true, null);
+
+    dispatcher.register(JobEventType.class, job);
+    job.handle(new JobEvent(jobId, JobEventType.JOB_INIT));
+    Assert.assertEquals(JobState.FAILED, job.getState());
+
+    job.handle(new JobEvent(jobId, JobEventType.JOB_TASK_COMPLETED));
+    Assert.assertEquals(JobState.FAILED, job.getState());
+    job.handle(new JobEvent(jobId, JobEventType.JOB_TASK_ATTEMPT_COMPLETED));
+    Assert.assertEquals(JobState.FAILED, job.getState());
+    job.handle(new JobEvent(jobId, JobEventType.JOB_MAP_TASK_RESCHEDULED));
+    Assert.assertEquals(JobState.FAILED, job.getState());
+    job.handle(new JobEvent(jobId, JobEventType.JOB_TASK_ATTEMPT_FETCH_FAILURE));
+    Assert.assertEquals(JobState.FAILED, job.getState());
+  }
+
+  private static class StubbedJob extends JobImpl {
+    //override the init transition
+    private final InitTransition initTransition = getInitTransition();
+    StateMachineFactory<JobImpl, JobStateInternal, JobEventType, JobEvent> localFactory
+        = stateMachineFactory.addTransition(JobStateInternal.NEW,
+            EnumSet.of(JobStateInternal.INITED, JobStateInternal.FAILED),
+            JobEventType.JOB_INIT,
+            // This is abusive.
+            initTransition);
+
+    private final StateMachine<JobStateInternal, JobEventType, JobEvent>
+        localStateMachine;
+
+    @Override
+    protected StateMachine<JobStateInternal, JobEventType, JobEvent> getStateMachine() {
+      return localStateMachine;
+    }
+
+    public StubbedJob(JobId jobId, ApplicationAttemptId applicationAttemptId,
+        Configuration conf, EventHandler eventHandler,
+        OutputCommitter committer, boolean newApiCommitter, String user) {
+      super(jobId, applicationAttemptId, conf, eventHandler,
+          null, new JobTokenSecretManager(), new Credentials(),
+          new SystemClock(), null, MRAppMetrics.create(), committer,
+          newApiCommitter, user, System.currentTimeMillis(), null, null);
+
+      // This "this leak" is okay because the retained pointer is in an
+      //  instance variable.
+      localStateMachine = localFactory.make(this);
+    }
   }
 }

@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -228,6 +229,7 @@ public class NameNode {
   public static final int DEFAULT_PORT = 8020;
   public static final Log LOG = LogFactory.getLog(NameNode.class.getName());
   public static final Log stateChangeLog = LogFactory.getLog("org.apache.hadoop.hdfs.StateChange");
+  public static final Log blockStateChangeLog = LogFactory.getLog("BlockStateChange");
   public static final HAState ACTIVE_STATE = new ActiveState();
   public static final HAState STANDBY_STATE = new StandbyState();
   
@@ -512,7 +514,7 @@ public class NameNode {
     stopHttpServer();
   }
   
-  private void startTrashEmptier(Configuration conf) throws IOException {
+  private void startTrashEmptier(final Configuration conf) throws IOException {
     long trashInterval =
         conf.getLong(FS_TRASH_INTERVAL_KEY, FS_TRASH_INTERVAL_DEFAULT);
     if (trashInterval == 0) {
@@ -521,7 +523,18 @@ public class NameNode {
       throw new IOException("Cannot start tresh emptier with negative interval."
           + " Set " + FS_TRASH_INTERVAL_KEY + " to a positive value.");
     }
-    this.emptier = new Thread(new Trash(conf).getEmptier(), "Trash Emptier");
+    
+    // This may be called from the transitionToActive code path, in which
+    // case the current user is the administrator, not the NN. The trash
+    // emptier needs to run as the NN. See HDFS-3972.
+    FileSystem fs = SecurityUtil.doAsLoginUser(
+        new PrivilegedExceptionAction<FileSystem>() {
+          @Override
+          public FileSystem run() throws IOException {
+            return FileSystem.get(conf);
+          }
+        });
+    this.emptier = new Thread(new Trash(fs, conf).getEmptier(), "Trash Emptier");
     this.emptier.setDaemon(true);
     this.emptier.start();
   }
@@ -587,11 +600,7 @@ public class NameNode {
     String nsId = getNameServiceId(conf);
     String namenodeId = HAUtil.getNameNodeId(conf, nsId);
     this.haEnabled = HAUtil.isHAEnabled(conf, nsId);
-    if (!haEnabled) {
-      state = ACTIVE_STATE;
-    } else {
-      state = STANDBY_STATE;
-    }
+    state = createHAState();
     this.allowStaleStandbyReads = HAUtil.shouldAllowStandbyReads(conf);
     this.haContext = createHAContext();
     try {
@@ -606,6 +615,10 @@ public class NameNode {
       this.stop();
       throw e;
     }
+  }
+
+  protected HAState createHAState() {
+    return !haEnabled ? ACTIVE_STATE : STANDBY_STATE;
   }
 
   protected HAContext createHAContext() {
@@ -712,6 +725,12 @@ public class NameNode {
     String namenodeId = HAUtil.getNameNodeId(conf, nsId);
     initializeGenericKeys(conf, nsId, namenodeId);
     checkAllowFormat(conf);
+
+    if (UserGroupInformation.isSecurityEnabled()) {
+      InetSocketAddress socAddr = getAddress(conf);
+      SecurityUtil.login(conf, DFS_NAMENODE_KEYTAB_FILE_KEY,
+          DFS_NAMENODE_USER_NAME_KEY, socAddr.getHostName());
+    }
     
     Collection<URI> nameDirsToFormat = FSNamesystem.getNamespaceDirs(conf);
     List<URI> sharedDirs = FSNamesystem.getSharedEditsDirs(conf);
@@ -720,9 +739,6 @@ public class NameNode {
     dirsToPrompt.addAll(sharedDirs);
     List<URI> editDirsToFormat = 
                  FSNamesystem.getNamespaceEditsDirs(conf);
-    if (!confirmFormat(dirsToPrompt, force, isInteractive)) {
-      return true; // aborted
-    }
 
     // if clusterID is not provided - see if you can find the current one
     String clusterId = StartupOption.FORMAT.getClusterId();
@@ -734,60 +750,14 @@ public class NameNode {
     
     FSImage fsImage = new FSImage(conf, nameDirsToFormat, editDirsToFormat);
     FSNamesystem fsn = new FSNamesystem(conf, fsImage);
+    fsImage.getEditLog().initJournalsForWrite();
+    
+    if (!fsImage.confirmFormat(force, isInteractive)) {
+      return true; // aborted
+    }
+    
     fsImage.format(fsn, clusterId);
     return false;
-  }
-
-  /**
-   * Check whether the given storage directories already exist.
-   * If running in interactive mode, will prompt the user for each
-   * directory to allow them to format anyway. Otherwise, returns
-   * false, unless 'force' is specified.
-   * 
-   * @param dirsToFormat the dirs to check
-   * @param force format regardless of whether dirs exist
-   * @param interactive prompt the user when a dir exists
-   * @return true if formatting should proceed
-   * @throws IOException
-   */
-  public static boolean confirmFormat(Collection<URI> dirsToFormat,
-      boolean force, boolean interactive)
-      throws IOException {
-    for(Iterator<URI> it = dirsToFormat.iterator(); it.hasNext();) {
-      URI dirUri = it.next();
-      if (!dirUri.getScheme().equals(NNStorage.LOCAL_URI_SCHEME)) {
-        System.err.println("Skipping format for directory \"" + dirUri
-            + "\". Can only format local directories with scheme \""
-            + NNStorage.LOCAL_URI_SCHEME + "\".");
-        continue;
-      }
-      // To validate only file based schemes are formatted
-      assert dirUri.getScheme().equals(NNStorage.LOCAL_URI_SCHEME) :
-        "formatting is not supported for " + dirUri;
-
-      File curDir = new File(dirUri.getPath());
-      // Its alright for a dir not to exist, or to exist (properly accessible)
-      // and be completely empty.
-      if (!curDir.exists() ||
-          (curDir.isDirectory() && FileUtil.listFiles(curDir).length == 0))
-        continue;
-      if (force) { // Don't confirm, always format.
-        System.err.println(
-            "Storage directory exists in " + curDir + ". Formatting anyway.");
-        continue;
-      }
-      if (!interactive) { // Don't ask - always don't format
-        System.err.println(
-            "Running in non-interactive mode, and image appears to exist in " +
-            curDir + ". Not formatting.");
-        return false;
-      }
-      if (!confirmPrompt("Re-format filesystem in " + curDir + " ?")) {
-        System.err.println("Format aborted in " + curDir);
-        return false;
-      }
-    }
-    return true;
   }
 
   public static void checkAllowFormat(Configuration conf) throws IOException {
@@ -802,13 +772,13 @@ public class NameNode {
   }
   
   @VisibleForTesting
-  public static boolean initializeSharedEdits(Configuration conf) {
+  public static boolean initializeSharedEdits(Configuration conf) throws IOException {
     return initializeSharedEdits(conf, true);
   }
   
   @VisibleForTesting
   public static boolean initializeSharedEdits(Configuration conf,
-      boolean force) {
+      boolean force) throws IOException {
     return initializeSharedEdits(conf, force, false);
   }
 
@@ -822,7 +792,7 @@ public class NameNode {
    * @return true if the command aborts, false otherwise
    */
   private static boolean initializeSharedEdits(Configuration conf,
-      boolean force, boolean interactive) {
+      boolean force, boolean interactive) throws IOException {
     String nsId = DFSUtil.getNamenodeNameServiceId(conf);
     String namenodeId = HAUtil.getNameNodeId(conf, nsId);
     initializeGenericKeys(conf, nsId, namenodeId);
@@ -831,6 +801,12 @@ public class NameNode {
       LOG.fatal("No shared edits directory configured for namespace " +
           nsId + " namenode " + namenodeId);
       return false;
+    }
+
+    if (UserGroupInformation.isSecurityEnabled()) {
+      InetSocketAddress socAddr = getAddress(conf);
+      SecurityUtil.login(conf, DFS_NAMENODE_KEYTAB_FILE_KEY,
+          DFS_NAMENODE_USER_NAME_KEY, socAddr.getHostName());
     }
 
     NNStorage existingStorage = null;
@@ -842,21 +818,26 @@ public class NameNode {
           FSNamesystem.getNamespaceEditsDirs(conf, false));
       
       existingStorage = fsns.getFSImage().getStorage();
+      NamespaceInfo nsInfo = existingStorage.getNamespaceInfo();
       
-      Collection<URI> sharedEditsDirs = FSNamesystem.getSharedEditsDirs(conf);
-      if (!confirmFormat(sharedEditsDirs, force, interactive)) {
-        return true; // aborted
-      }
-      NNStorage newSharedStorage = new NNStorage(conf,
+      List<URI> sharedEditsDirs = FSNamesystem.getSharedEditsDirs(conf);
+      
+      FSImage sharedEditsImage = new FSImage(conf,
           Lists.<URI>newArrayList(),
           sharedEditsDirs);
+      sharedEditsImage.getEditLog().initJournalsForWrite();
       
-      newSharedStorage.format(new NamespaceInfo(
-          existingStorage.getNamespaceID(),
-          existingStorage.getClusterID(),
-          existingStorage.getBlockPoolID(),
-          existingStorage.getCTime()));
+      if (!sharedEditsImage.confirmFormat(force, interactive)) {
+        return true; // abort
+      }
       
+      NNStorage newSharedStorage = sharedEditsImage.getStorage();
+      // Call Storage.format instead of FSImage.format here, since we don't
+      // actually want to save a checkpoint - just prime the dirs with
+      // the existing namespace info
+      newSharedStorage.format(nsInfo);
+      sharedEditsImage.getEditLog().formatNonFileJournals(nsInfo);
+
       // Need to make sure the edit log segments are in good shape to initialize
       // the shared edits dir.
       fsns.getFSImage().getEditLog().close();
@@ -1071,6 +1052,9 @@ public class NameNode {
 
   private static void doRecovery(StartupOption startOpt, Configuration conf)
       throws IOException {
+    String nsId = DFSUtil.getNamenodeNameServiceId(conf);
+    String namenodeId = HAUtil.getNameNodeId(conf, nsId);
+    initializeGenericKeys(conf, nsId, namenodeId);
     if (startOpt.getForce() < MetaRecoveryContext.FORCE_ALL) {
       if (!confirmPrompt("You have selected Metadata Recovery mode.  " +
           "This mode is intended to recover lost metadata on a corrupt " +
@@ -1209,7 +1193,7 @@ public class NameNode {
       URI defaultUri = URI.create(HdfsConstants.HDFS_URI_SCHEME + "://"
           + conf.get(DFS_NAMENODE_RPC_ADDRESS_KEY));
       conf.set(FS_DEFAULT_NAME_KEY, defaultUri.toString());
-      LOG.info("Setting " + FS_DEFAULT_NAME_KEY + " to " + defaultUri.toString());
+      LOG.debug("Setting " + FS_DEFAULT_NAME_KEY + " to " + defaultUri.toString());
     }
   }
     
@@ -1315,7 +1299,7 @@ public class NameNode {
    *          before exit.
    * @throws ExitException thrown only for testing.
    */
-  private synchronized void doImmediateShutdown(Throwable t)
+  protected synchronized void doImmediateShutdown(Throwable t)
       throws ExitException {
     String message = "Error encountered requiring NN shutdown. " +
         "Shutting down immediately.";

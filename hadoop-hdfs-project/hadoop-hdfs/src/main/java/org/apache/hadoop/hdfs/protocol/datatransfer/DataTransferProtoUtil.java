@@ -24,9 +24,9 @@ import org.apache.hadoop.hdfs.protocol.ExtendedBlock;
 import org.apache.hadoop.hdfs.protocol.HdfsProtoUtil;
 import org.apache.hadoop.hdfs.protocol.proto.DataTransferProtos.BaseHeaderProto;
 import org.apache.hadoop.hdfs.protocol.proto.DataTransferProtos.ChecksumProto;
-import org.apache.hadoop.hdfs.protocol.proto.DataTransferProtos.ChecksumProto.ChecksumType;
 import org.apache.hadoop.hdfs.protocol.proto.DataTransferProtos.ClientOperationHeaderProto;
 import org.apache.hadoop.hdfs.protocol.proto.DataTransferProtos.OpWriteBlockProto;
+import org.apache.hadoop.hdfs.protocol.proto.HdfsProtos.ChecksumTypeProto;
 import org.apache.hadoop.hdfs.security.token.block.BlockTokenIdentifier;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.util.DataChecksum;
@@ -52,7 +52,7 @@ public abstract class DataTransferProtoUtil {
   }
 
   public static ChecksumProto toProto(DataChecksum checksum) {
-    ChecksumType type = ChecksumType.valueOf(checksum.getChecksumType().name());
+    ChecksumTypeProto type = HdfsProtoUtil.toProto(checksum.getChecksumType());
     if (type == null) {
       throw new IllegalArgumentException(
           "Can't convert checksum to protobuf: " + checksum);
@@ -68,7 +68,7 @@ public abstract class DataTransferProtoUtil {
     if (proto == null) return null;
 
     int bytesPerChecksum = proto.getBytesPerChecksum();
-    DataChecksum.Type type = DataChecksum.Type.valueOf(proto.getType().name());
+    DataChecksum.Type type = HdfsProtoUtil.fromProto(proto.getType());
     
     return DataChecksum.newDataChecksum(type, bytesPerChecksum);
   }

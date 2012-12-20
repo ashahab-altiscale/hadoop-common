@@ -18,6 +18,8 @@
 
 package org.apache.hadoop.mapreduce.v2.util;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.util.HashMap;
@@ -27,7 +29,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FilterFileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.mapred.InvalidJobConfException;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.JobID;
 import org.apache.hadoop.mapreduce.MRJobConfig;
@@ -36,18 +37,42 @@ import org.apache.hadoop.mapreduce.v2.api.records.JobId;
 import org.apache.hadoop.mapreduce.v2.api.records.TaskAttemptId;
 import org.apache.hadoop.mapreduce.v2.api.records.TaskId;
 import org.apache.hadoop.mapreduce.v2.api.records.TaskType;
-import org.apache.hadoop.mapreduce.v2.util.MRApps;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.LocalResource;
 import org.apache.hadoop.yarn.api.records.LocalResourceType;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.factory.providers.RecordFactoryProvider;
-
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
+
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
 public class TestMRApps {
+  private static File testWorkDir = null;
+  
+  @BeforeClass
+  public static void setupTestDirs() throws IOException {
+    testWorkDir = new File("target", TestMRApps.class.getCanonicalName());
+    delete(testWorkDir);
+    testWorkDir.mkdirs();
+    testWorkDir = testWorkDir.getAbsoluteFile();
+  }
+  
+  @AfterClass
+  public static void cleanupTestDirs() throws IOException {
+    if (testWorkDir != null) {
+      delete(testWorkDir);
+    }
+  }
+  
+  private static void delete(File dir) throws IOException {
+    Path p = new Path("file://"+dir.getAbsolutePath());
+    Configuration conf = new Configuration();
+    FileSystem fs = p.getFileSystem(conf);
+    fs.delete(p, true);
+  }
 
   @Test public void testJobIDtoString() {
     JobId jid = RecordFactoryProvider.getRecordFactory(null).newRecordInstance(JobId.class);
@@ -154,6 +179,28 @@ public class TestMRApps {
     }
     assertTrue(environment.get("CLASSPATH").contains(mrAppClasspath));
   }
+  
+  @Test public void testSetClasspathWithArchives () throws IOException {
+    File testTGZ = new File(testWorkDir, "test.tgz");
+    FileOutputStream out = new FileOutputStream(testTGZ);
+    out.write(0);
+    out.close();
+    Job job = Job.getInstance();
+    Configuration conf = job.getConfiguration();
+    conf.set(MRJobConfig.CLASSPATH_ARCHIVES, "file://" 
+        + testTGZ.getAbsolutePath());
+    conf.set(MRJobConfig.CACHE_ARCHIVES, "file://"
+        + testTGZ.getAbsolutePath() + "#testTGZ");
+    Map<String, String> environment = new HashMap<String, String>();
+    MRApps.setClasspath(environment, conf);
+    assertTrue(environment.get("CLASSPATH").startsWith("$PWD:"));
+    String confClasspath = job.getConfiguration().get(YarnConfiguration.YARN_APPLICATION_CLASSPATH);
+    if (confClasspath != null) {
+      confClasspath = confClasspath.replaceAll(",\\s*", ":").trim();
+    }
+    assertTrue(environment.get("CLASSPATH").contains(confClasspath));
+    assertTrue(environment.get("CLASSPATH").contains("testTGZ"));
+  }
 
  @Test public void testSetClasspathWithUserPrecendence() {
     Configuration conf = new Configuration();
@@ -166,7 +213,7 @@ public class TestMRApps {
     }
     String env_str = env.get("CLASSPATH");
     assertSame("MAPREDUCE_JOB_USER_CLASSPATH_FIRST set, but not taking effect!",
-      env_str.indexOf("$PWD:job.jar/:job.jar/classes/:job.jar/lib/*:$PWD/*"), 0);
+      env_str.indexOf("$PWD:job.jar/job.jar:job.jar/classes/:job.jar/lib/*:$PWD/*"), 0);
   }
 
   @Test public void testSetClasspathWithNoUserPrecendence() {
@@ -180,7 +227,7 @@ public class TestMRApps {
     }
     String env_str = env.get("CLASSPATH");
     int index = 
-         env_str.indexOf("job.jar/:job.jar/classes/:job.jar/lib/*:$PWD/*");
+         env_str.indexOf("job.jar/job.jar:job.jar/classes/:job.jar/lib/*:$PWD/*");
     assertNotSame("MAPREDUCE_JOB_USER_CLASSPATH_FIRST false, and job.jar is not"
             + " in the classpath!", index, -1);
     assertNotSame("MAPREDUCE_JOB_USER_CLASSPATH_FIRST false, but taking effect!",
@@ -197,7 +244,7 @@ public class TestMRApps {
   }
   
   @SuppressWarnings("deprecation")
-  @Test(expected = InvalidJobConfException.class)
+  @Test
   public void testSetupDistributedCacheConflicts() throws Exception {
     Configuration conf = new Configuration();
     conf.setClass("fs.mockfs.impl", MockFileSystem.class, FileSystem.class);
@@ -225,10 +272,18 @@ public class TestMRApps {
     Map<String, LocalResource> localResources = 
       new HashMap<String, LocalResource>();
     MRApps.setupDistributedCache(conf, localResources);
+    
+    assertEquals(1, localResources.size());
+    LocalResource lr = localResources.get("something");
+    //Archive wins
+    assertNotNull(lr);
+    assertEquals(10l, lr.getSize());
+    assertEquals(10l, lr.getTimestamp());
+    assertEquals(LocalResourceType.ARCHIVE, lr.getType());
   }
   
   @SuppressWarnings("deprecation")
-  @Test(expected = InvalidJobConfException.class)
+  @Test
   public void testSetupDistributedCacheConflictsFiles() throws Exception {
     Configuration conf = new Configuration();
     conf.setClass("fs.mockfs.impl", MockFileSystem.class, FileSystem.class);
@@ -253,6 +308,14 @@ public class TestMRApps {
     Map<String, LocalResource> localResources = 
       new HashMap<String, LocalResource>();
     MRApps.setupDistributedCache(conf, localResources);
+    
+    assertEquals(1, localResources.size());
+    LocalResource lr = localResources.get("something");
+    //First one wins
+    assertNotNull(lr);
+    assertEquals(10l, lr.getSize());
+    assertEquals(10l, lr.getTimestamp());
+    assertEquals(LocalResourceType.FILE, lr.getType());
   }
   
   @SuppressWarnings("deprecation")

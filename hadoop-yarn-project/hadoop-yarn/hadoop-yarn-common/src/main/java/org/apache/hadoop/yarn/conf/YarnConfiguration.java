@@ -21,9 +21,12 @@ package org.apache.hadoop.yarn.conf;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
+import java.util.Arrays;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.net.NetUtils;
+import org.apache.hadoop.util.StringUtils;
+import org.apache.hadoop.yarn.api.ApplicationConstants;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
@@ -111,18 +114,18 @@ public class YarnConfiguration extends Configuration {
   /** Miniumum memory request grant-able by the RM scheduler. */
   public static final String RM_SCHEDULER_MINIMUM_ALLOCATION_MB =
     YARN_PREFIX + "scheduler.minimum-allocation-mb";
-  public static final int DEFAULT_RM_SCHEDULER_MINIMUM_ALLOCATION_MB = 128;
+  public static final int DEFAULT_RM_SCHEDULER_MINIMUM_ALLOCATION_MB = 1024;
 
   /** Maximum memory request grant-able by the RM scheduler. */
   public static final String RM_SCHEDULER_MAXIMUM_ALLOCATION_MB =
     YARN_PREFIX + "scheduler.maximum-allocation-mb";
-  public static final int DEFAULT_RM_SCHEDULER_MAXIMUM_ALLOCATION_MB = 10240;
+  public static final int DEFAULT_RM_SCHEDULER_MAXIMUM_ALLOCATION_MB = 8192;
 
   /** Number of threads to handle scheduler interface.*/
   public static final String RM_SCHEDULER_CLIENT_THREAD_COUNT =
     RM_PREFIX + "scheduler.client.thread-count";
   public static final int DEFAULT_RM_SCHEDULER_CLIENT_THREAD_COUNT = 50;
-  
+
   /** The address of the RM web application.*/
   public static final String RM_WEBAPP_ADDRESS = 
     RM_PREFIX + "webapp.address";
@@ -205,6 +208,8 @@ public class YarnConfiguration extends Configuration {
   public static final String RM_SCHEDULER = 
     RM_PREFIX + "scheduler.class";
  
+  public static final String DEFAULT_RM_SCHEDULER = 
+      "org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacityScheduler";
 
   //Delegation token related keys
   public static final String  DELEGATION_KEY_UPDATE_INTERVAL_KEY = 
@@ -220,18 +225,11 @@ public class YarnConfiguration extends Configuration {
   public static final long    DELEGATION_TOKEN_MAX_LIFETIME_DEFAULT = 
     7*24*60*60*1000; // 7 days
   
+  public static final String RECOVERY_ENABLED = RM_PREFIX + "recovery.enabled";
+  public static final boolean DEFAULT_RM_RECOVERY_ENABLED = false;
   
   /** The class to use as the persistent store.*/
   public static final String RM_STORE = RM_PREFIX + "store.class";
- 
-  /** The address of the zookeeper instance to use with ZK store.*/
-  public static final String RM_ZK_STORE_ADDRESS = 
-    RM_PREFIX + "zookeeper-store.address";
-  
-  /** The zookeeper session timeout for the zookeeper store.*/
-  public static final String RM_ZK_STORE_TIMEOUT_MS = 
-    RM_PREFIX + "zookeeper-store.session.timeout-ms";
-  public static final int DEFAULT_RM_ZK_STORE_TIMEOUT_MS = 60000;
   
   /** The maximum number of completed applications RM keeps. */ 
   public static final String RM_MAX_COMPLETED_APPLICATIONS =
@@ -281,7 +279,12 @@ public class YarnConfiguration extends Configuration {
 
   /** Environment variables that containers may override rather than use NodeManager's default.*/
   public static final String NM_ENV_WHITELIST = NM_PREFIX + "env-whitelist";
-  public static final String DEFAULT_NM_ENV_WHITELIST = "JAVA_HOME,HADOOP_COMMON_HOME,HADOOP_HDFS_HOME,HADOOP_CONF_DIR,YARN_HOME";
+  public static final String DEFAULT_NM_ENV_WHITELIST = StringUtils.join(",",
+    Arrays.asList(ApplicationConstants.Environment.JAVA_HOME.key(),
+      ApplicationConstants.Environment.HADOOP_COMMON_HOME.key(),
+      ApplicationConstants.Environment.HADOOP_HDFS_HOME.key(),
+      ApplicationConstants.Environment.HADOOP_CONF_DIR.key(),
+      ApplicationConstants.Environment.HADOOP_YARN_HOME.key()));
   
   /** address of node manager IPC.*/
   public static final String NM_ADDRESS = NM_PREFIX + "address";
@@ -416,10 +419,13 @@ public class YarnConfiguration extends Configuration {
   public final static String NM_CONTAINER_MON_INTERVAL_MS =
     NM_PREFIX + "container-monitor.interval-ms";
   public final static int DEFAULT_NM_CONTAINER_MON_INTERVAL_MS = 3000;
-  
+
   /** Class that calculates containers current resource utilization.*/
   public static final String NM_CONTAINER_MON_RESOURCE_CALCULATOR =
     NM_PREFIX + "container-monitor.resource-calculator.class";
+  /** Class that calculates process tree resource utilization.*/
+  public static final String NM_CONTAINER_MON_PROCESS_TREE =
+    NM_PREFIX + "container-monitor.process-tree.class";
 
   /**
    * Enable/Disable disks' health checker. Default is true.
@@ -567,12 +573,19 @@ public class YarnConfiguration extends Configuration {
    * CLASSPATH entries
    */
   public static final String[] DEFAULT_YARN_APPLICATION_CLASSPATH = {
-      "$HADOOP_CONF_DIR", "$HADOOP_COMMON_HOME/share/hadoop/common/*",
-      "$HADOOP_COMMON_HOME/share/hadoop/common/lib/*",
-      "$HADOOP_HDFS_HOME/share/hadoop/hdfs/*",
-      "$HADOOP_HDFS_HOME/share/hadoop/hdfs/lib/*",
-      "$YARN_HOME/share/hadoop/yarn/*",
-      "$YARN_HOME/share/hadoop/yarn/lib/*"};
+      ApplicationConstants.Environment.HADOOP_CONF_DIR.$(),
+      ApplicationConstants.Environment.HADOOP_COMMON_HOME.$()
+          + "/share/hadoop/common/*",
+      ApplicationConstants.Environment.HADOOP_COMMON_HOME.$()
+          + "/share/hadoop/common/lib/*",
+      ApplicationConstants.Environment.HADOOP_HDFS_HOME.$()
+          + "/share/hadoop/hdfs/*",
+      ApplicationConstants.Environment.HADOOP_HDFS_HOME.$()
+          + "/share/hadoop/hdfs/lib/*",
+      ApplicationConstants.Environment.HADOOP_YARN_HOME.$()
+          + "/share/hadoop/yarn/*",
+      ApplicationConstants.Environment.HADOOP_YARN_HOME.$()
+          + "/share/hadoop/yarn/lib/*" };
 
   /** Container temp directory */
   public static final String DEFAULT_CONTAINER_TEMP_DIR = "./tmp";

@@ -50,12 +50,44 @@ function(dual_output_directory TGT DIR)
     output_directory(${TGT}_static "${DIR}")
 endfunction(dual_output_directory TGT DIR)
 
+#
+# This macro alters the behavior of find_package and find_library.
+# It does this by setting the CMAKE_FIND_LIBRARY_SUFFIXES global variable. 
+# You should save that variable before calling this function and restore it
+# after you have accomplished your goal.
+#
+# The behavior is altered in two ways:
+# 1. We always find shared libraries, never static;
+# 2. We find shared libraries with the given version number.
+#
+# On Windows this function is a no-op.  Windows does not encode
+# version number information information into library path names.
+#
+macro(set_find_shared_library_version LVERS)
+    IF(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+        # Mac OS uses .dylib
+        SET(CMAKE_FIND_LIBRARY_SUFFIXES ".${LVERS}.dylib")
+    ELSEIF(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
+        # FreeBSD has always .so installed.
+        SET(CMAKE_FIND_LIBRARY_SUFFIXES ".so")
+    ELSEIF(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+        # Windows doesn't support finding shared libraries by version.
+    ELSE()
+        # Most UNIX variants use .so
+        SET(CMAKE_FIND_LIBRARY_SUFFIXES ".so.${LVERS}")
+    ENDIF()
+endmacro(set_find_shared_library_version LVERS)
+
 if (NOT GENERATED_JAVAH)
     # Must identify where the generated headers have been placed
     MESSAGE(FATAL_ERROR "You must set the cmake variable GENERATED_JAVAH")
 endif (NOT GENERATED_JAVAH)
 find_package(JNI REQUIRED)
+
+SET(STORED_CMAKE_FIND_LIBRARY_SUFFIXES CMAKE_FIND_LIBRARY_SUFFIXES)
+set_find_shared_library_version("1")
 find_package(ZLIB REQUIRED)
+SET(CMAKE_FIND_LIBRARY_SUFFIXES STORED_CMAKE_FIND_LIBRARY_SUFFIXES)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -Wall -O2")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_REENTRANT -D_FILE_OFFSET_BITS=64")
@@ -66,13 +98,18 @@ GET_FILENAME_COMPONENT(HADOOP_ZLIB_LIBRARY ${ZLIB_LIBRARIES} NAME)
 
 INCLUDE(CheckFunctionExists)
 INCLUDE(CheckCSourceCompiles)
+INCLUDE(CheckLibraryExists)
 CHECK_FUNCTION_EXISTS(sync_file_range HAVE_SYNC_FILE_RANGE)
 CHECK_FUNCTION_EXISTS(posix_fadvise HAVE_POSIX_FADVISE)
+CHECK_LIBRARY_EXISTS(dl dlopen "" NEED_LINK_DL)
 
+SET(STORED_CMAKE_FIND_LIBRARY_SUFFIXES CMAKE_FIND_LIBRARY_SUFFIXES)
+set_find_shared_library_version("1")
 find_library(SNAPPY_LIBRARY 
     NAMES snappy
     PATHS ${CUSTOM_SNAPPY_PREFIX} ${CUSTOM_SNAPPY_PREFIX}/lib
           ${CUSTOM_SNAPPY_PREFIX}/lib64 ${CUSTOM_SNAPPY_LIB})
+SET(CMAKE_FIND_LIBRARY_SUFFIXES STORED_CMAKE_FIND_LIBRARY_SUFFIXES)
 find_path(SNAPPY_INCLUDE_DIR 
     NAMES snappy.h
     PATHS ${CUSTOM_SNAPPY_PREFIX} ${CUSTOM_SNAPPY_PREFIX}/include
@@ -123,9 +160,13 @@ add_dual_library(hadoop
     ${D}/security/JniBasedUnixGroupsMapping.c
     ${D}/security/JniBasedUnixGroupsNetgroupMapping.c
     ${D}/security/getGroup.c
+    ${D}/util/NativeCodeLoader.c
     ${D}/util/NativeCrc32.c
     ${D}/util/bulk_crc32.c
 )
+if (NEED_LINK_DL)
+   set(LIB_DL dl)
+endif (NEED_LINK_DL)
 
 IF (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     #
@@ -138,7 +179,7 @@ IF (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 ENDIF()
 
 target_link_dual_libraries(hadoop
-    dl
+    ${LIB_DL}
     ${JAVA_JVM_LIBRARY}
 )
 SET(LIBHADOOP_VERSION "1.0.0")

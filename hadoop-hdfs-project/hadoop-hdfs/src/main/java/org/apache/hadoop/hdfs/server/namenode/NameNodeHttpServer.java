@@ -107,6 +107,10 @@ public class NameNodeHttpServer {
               DFSConfigKeys.DFS_WEB_AUTHENTICATION_KERBEROS_PRINCIPAL_KEY,
               SecurityUtil.getServerPrincipal(principalInConf,
                                               bindAddress.getHostName()));
+        } else if (UserGroupInformation.isSecurityEnabled()) {
+          LOG.error("WebHDFS and security are enabled, but configuration property '" +
+                    DFSConfigKeys.DFS_WEB_AUTHENTICATION_KERBEROS_PRINCIPAL_KEY +
+                    "' is not set.");
         }
         String httpKeytab = conf.get(
           DFSConfigKeys.DFS_WEB_AUTHENTICATION_KERBEROS_KEYTAB_KEY);
@@ -117,6 +121,10 @@ public class NameNodeHttpServer {
           params.put(
             DFSConfigKeys.DFS_WEB_AUTHENTICATION_KERBEROS_KEYTAB_KEY,
             httpKeytab);
+        } else if (UserGroupInformation.isSecurityEnabled()) {
+          LOG.error("WebHDFS and security are enabled, but configuration property '" +
+                    DFSConfigKeys.DFS_WEB_AUTHENTICATION_KERBEROS_KEYTAB_KEY +
+                    "' is not set.");
         }
         return params;
       }
@@ -140,7 +148,8 @@ public class NameNodeHttpServer {
         .getPort());
     }
     httpServer.setAttribute(NAMENODE_ATTRIBUTE_KEY, nn);
-    httpServer.setAttribute(NAMENODE_ADDRESS_ATTRIBUTE_KEY, nn.getNameNodeAddress());
+    httpServer.setAttribute(NAMENODE_ADDRESS_ATTRIBUTE_KEY,
+        NetUtils.getConnectAddress(nn.getNameNodeAddress()));
     httpServer.setAttribute(FSIMAGE_ATTRIBUTE_KEY, nn.getFSImage());
     httpServer.setAttribute(JspHelper.CURRENT_CONF, conf);
     setupServlets(httpServer, conf);

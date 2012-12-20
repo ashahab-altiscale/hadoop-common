@@ -47,6 +47,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNode;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.fica.FiCaSchedulerApp;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.fica.FiCaSchedulerNode;
 import org.apache.hadoop.yarn.server.resourcemanager.security.ApplicationTokenSecretManager;
+import org.apache.hadoop.yarn.server.resourcemanager.security.ClientToAMTokenSecretManagerInRM;
 import org.apache.hadoop.yarn.server.resourcemanager.security.RMContainerTokenSecretManager;
 
 public class TestUtils {
@@ -82,9 +83,10 @@ public class TestUtils {
     
     Configuration conf = new Configuration();
     RMContext rmContext =
-        new RMContextImpl(null, nullDispatcher, cae, null, null, null,
+        new RMContextImpl(nullDispatcher, cae, null, null, null,
           new ApplicationTokenSecretManager(conf),
-          new RMContainerTokenSecretManager(conf));
+          new RMContainerTokenSecretManager(conf),
+          new ClientToAMTokenSecretManagerInRM());
     
     return rmContext;
   }

@@ -1,4 +1,4 @@
-Hadoop MapReduce Change Log
+Hadoop YARN Change Log
 
 Release 2.0.3-alpha - Unreleased
   
@@ -6,7 +6,18 @@ Release 2.0.3-alpha - Unreleased
 
   NEW FEATURES
 
+    YARN-145. Add a Web UI to the fair share scheduler. (Sandy Ryza via tomwhite)
+
+    YARN-230. RM Restart phase 1 - includes support for saving/restarting all
+    applications on an RM bounce. (Bikas Saha via acmurthy)
+
   IMPROVEMENTS
+
+    YARN-223. Update process tree instead of getting new process trees.
+    (Radim Kolar via llu)
+
+    YARN-57. Allow process-tree based resource calculation et al. to be
+    pluggable to support it on multiple platforms. (Radim Kolar via acmurthy)
 
     YARN-78. Changed UnManagedAM application to use YarnClient. (Bikas Saha via
     vinodkv)
@@ -17,11 +28,104 @@ Release 2.0.3-alpha - Unreleased
     YARN-28. Fixed TestCompositeService to not depend on test-order and thus
     made it pass on JDK7 (Thomas Graves via vinodkv).
 
+    YARN-82. Change the default local and log dirs to be based on
+    hadoop.tmp.dir and yarn.log.dir. (Hemanth Yamijala via sseth)
+
+    YARN-53. Added the missing getGroups API to ResourceManager. (Bo Wang via
+    vinodkv)
+
+    YARN-116. Add the ability to change the RM include/exclude file without
+    a restart. (xieguiming and Harsh J via sseth)
+
+    YARN-23. FairScheduler: FSQueueSchedulable#updateDemand() - potential 
+    redundant aggregation. (kkambatl via tucu)
+
+    YARN-127. Move RMAdmin tool to its correct location - the client module.
+    (vinodkv)
+
+    YARN-40. Provided support for missing YARN commands (Devaraj K and Vinod
+    Kumar Vavilapalli via vinodkv)
+
+    YARN-33. Change LocalDirsHandlerService to validate the configured local and
+    log dirs. (Mayank Bansal via sseth)
+
+    YARN-94. Modify DistributedShell to point to main-class by default, clean up
+    the help message, and hard-code the AM class. (Hitesh Shah via vinodkv)
+
+    YARN-146. Add unit tests for computing fair share in the fair scheduler.
+    (Sandy Ryza via tomwhite)
+
+    HADOOP-8911. CRLF characters in source and text files.
+    (Raja Aluri via suresh)
+
+    YARN-136. Make ClientToAMTokenSecretManager part of RMContext (Vinod Kumar
+    Vavilapalli via sseth)
+
+    YARN-183. Clean up fair scheduler code. (Sandy Ryza via tomwhite)
+
+    YARN-129. Simplify classpath construction for mini YARN tests. (tomwhite)
+
+    YARN-254. Update fair scheduler web UI for hierarchical queues. 
+    (sandyr via tucu)
+
   OPTIMIZATIONS
 
   BUG FIXES 
+    
+    YARN-131. Fix incorrect ACL properties in capacity scheduler documentation.
+    (Ahmed Radwan via sseth)
+
+    YARN-102. Move the apache header to the top of the file in MemStore.java.
+    (Devaraj K via sseth)
+    
+    YARN-134. ClientToAMSecretManager creates keys without checking for
+    validity of the appID. (Vinod Kumar Vavilapalli via sseth)
+
+    YARN-30. Fixed tests verifying web-services to work on JDK7. (Thomas Graves
+    via vinodkv)
+
+    YARN-150. Fixes AppRejectedTransition does not unregister a rejected
+    app-attempt from the ApplicationMasterService (Bikas Saha via sseth)
+
+    YARN-140. Add capacity-scheduler-default.xml to provide a default set of
+    configurations for the capacity scheduler. (ahmed via tucu)
+
+    YARN-179. Fix some unit test failures. (Vinod Kumar Vavilapalli via sseth)
+
+    YARN-181. Fixed eclipse settings broken by capacity-scheduler.xml move via
+    YARN-140. (Siddharth Seth via vinodkv)
+
+    YARN-169. Update log4j.appender.EventCounter to use
+    org.apache.hadoop.log.metrics.EventCounter (Anthony Rojas via tomwhite)
+
+    YARN-184. Remove unnecessary locking in fair scheduler, and address 
+    findbugs excludes. (sandyr via tucu)
+
+    YARN-224. Fair scheduler logs too many nodeUpdate INFO messages.
+    (Sandy Ryza via tomwhite)
+
+    YARN-222. Fair scheduler should create queue for each user by default.
+    (Sandy Ryza via tomwhite)
+
+    MAPREDUCE-4778. Fair scheduler event log is only written if directory
+    exists on HDFS. (Sandy Ryza via tomwhite)
+
+    YARN-229. Remove old unused RM recovery code. (Bikas Saha via acmurthy) 
+
+    YARN-187. Add hierarchical queues to the fair scheduler.
+    (Sandy Ryza via tomwhite)
+
+    YARN-72. NM should handle cleaning up containers when it shuts down.
+    (Sandy Ryza via tomwhite)
+
+    YARN-267. Fix fair scheduler web UI. (Sandy Ryza via tomwhite)
+
+    YARN-264. y.s.rm.DelegationTokenRenewer attempts to renew token even 
+    after removing an app. (kkambatl via tucu)
 
 Release 2.0.2-alpha - 2012-09-07 
+
+    YARN-9. Rename YARN_HOME to HADOOP_YARN_HOME. (vinodkv via acmurthy)
 
   NEW FEATURES
 
@@ -36,6 +140,9 @@ Release 2.0.2-alpha - 2012-09-07
 
     YARN-80. Add support for delaying rack-local containers in
     CapacityScheduler. (acmurthy) 
+
+    YARN-137. Change the default YARN scheduler to be the CapacityScheduler. 
+    (sseth via acmurthy) 
 
   OPTIMIZATIONS
 
@@ -66,7 +173,112 @@ Release 2.0.2-alpha - 2012-09-07
     YARN-75. Modified ResourceManager's RMContainer to handle a valid RELEASE
     event at RUNNING state. (Siddharth Seth via vinodkv)
 
-Release 0.23.4 - UNRELEASED
+    YARN-138. Ensure default values for minimum/maximum container sizes is
+    sane. (harsh & sseth via acmurthy)
+
+Release 0.23.6 - UNRELEASED
+
+  INCOMPATIBLE CHANGES
+
+  NEW FEATURES
+
+  IMPROVEMENTS
+
+  OPTIMIZATIONS
+
+  BUG FIXES
+
+    YARN-188. Coverage fixing for CapacityScheduler (Aleksey Gorshkov via
+    bobby)
+
+    YARN-214. RMContainerImpl does not handle event EXPIRE at state RUNNING
+    (jeagles via bobby)
+
+    YARN-151. Browser thinks RM main page JS is taking too long 
+    (Ravi Prakash via bobby)
+
+    YARN-204. test coverage for org.apache.hadoop.tools (Aleksey Gorshkov via
+    bobby)
+
+    YARN-251. Proxy URI generation fails for blank tracking URIs (Tom White
+    via jlowe)
+
+    YARN-258. RM web page UI shows Invalid Date for start and finish times
+    (Ravi Prakash via jlowe)
+
+    YARN-266. RM and JHS Web UIs are blank because AppsBlock is not escaping
+    string properly (Ravi Prakash via jlowe)
+
+Release 0.23.5 - UNRELEASED
+
+  INCOMPATIBLE CHANGES
+
+  NEW FEATURES
+
+  IMPROVEMENTS
+
+    YARN-161. Fix multiple compiler warnings for unchecked operations in YARN
+    common. (Chris Nauroth via vinodkv)
+
+    YARN-43. Fix TestResourceTrackerService to not depend on test order and thus
+    pass on JDK7. (Thomas Graves via vinodkv)
+
+    YARN-32. Fix TestApplicationTokens to not depend on test order and thus pass
+    on JDK7. (vinodkv)
+
+    YARN-186. Coverage fixing LinuxContainerExecutor (Aleksey Gorshkov via
+    bobby)
+
+    YARN-216. Remove jquery theming support. (Robert Joseph Evans via jlowe)
+
+  OPTIMIZATIONS
+
+  BUG FIXES
+
+    YARN-163. Retrieving container log via NM webapp can hang with multibyte
+    characters in log (jlowe via bobby)
+
+    YARN-174. Modify NodeManager to pass the user's configuration even when
+    rebooting. (vinodkv)
+
+    YARN-177. CapacityScheduler - adding a queue while the RM is running has 
+    wacky results (acmurthy vai tgraves)
+
+    YARN-178. Fix custom ProcessTree instance creation (Radim Kolar via bobby)
+
+    YARN-180. Capacity scheduler - containers that get reserved create 
+    container token to early (acmurthy and bobby)
+
+    YARN-139. Interrupted Exception within AsyncDispatcher leads to user
+    confusion. (Vinod Kumar Vavilapalli via jlowe)
+
+    YARN-165. RM should point tracking URL to RM web page for app when AM fails
+    (jlowe via bobby)
+
+    YARN-159. RM web ui applications page should be sorted to display last app
+    first (tgraves via bobby)
+
+    YARN-166. capacity scheduler doesn't allow capacity < 1.0 (tgraves via
+    bobby)
+
+    YARN-189. Fixed a deadlock between RM's ApplicationMasterService and the
+    dispatcher. (Thomas Graves via vinodkv)
+
+    YARN-202. Log Aggregation generates a storm of fsync() for namenode 
+    (Kihwal Lee via bobby)
+
+    YARN-201. Fix CapacityScheduler to be less conservative for starved 
+    off-switch requests. (jlowe via acmurthy) 
+
+    YARN-206. TestApplicationCleanup.testContainerCleanup occasionally fails.
+    (jlowe via jeagles)
+
+    YARN-212. NM state machine ignores an APPLICATION_CONTAINER_FINISHED event
+    when it shouldn't (Nathan Roberts via jlowe)
+
+    YARN-219. NM should aggregate logs when application finishes. (bobby)
+
+Release 0.23.4
 
   INCOMPATIBLE CHANGES
 
@@ -79,11 +291,20 @@ Release 0.23.4 - UNRELEASED
     YARN-108. FSDownload can create cache directories with the wrong
     permissions (Jason Lowe via bobby)
 
+    YARN-57. Allow process-tree based resource calculation et al. to be
+    pluggable to support it on multiple platforms. (Radim Kolar via acmurthy)
+
   OPTIMIZATIONS
 
   BUG FIXES
 
-Release 0.23.3 - Unreleased 
+    YARN-88. DefaultContainerExecutor can fail to set proper permissions.
+    (Jason Lowe via sseth)
+
+    YARN-106. Nodemanager needs to set permissions of local directories (jlowe
+    via bobby)
+
+Release 0.23.3
 
   INCOMPATIBLE CHANGES
 

@@ -32,7 +32,6 @@ import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.hdfs.protocol.Block;
 import org.apache.hadoop.hdfs.protocol.HdfsConstants;
-import org.apache.hadoop.hdfs.protocol.HdfsFileStatus;
 import org.apache.hadoop.hdfs.protocol.LayoutVersion;
 import org.apache.hadoop.hdfs.server.blockmanagement.BlockInfo;
 import org.apache.hadoop.hdfs.server.blockmanagement.BlockInfoUnderConstruction;
@@ -92,7 +91,7 @@ public class FSEditLogLoader {
                                  expectedStartingTxId, recovery);
       FSImage.LOG.info("Edits file " + edits.getName() 
           + " of size " + edits.length() + " edits # " + numEdits 
-          + " loaded in " + (now()-startTime)/1000 + " seconds.");
+          + " loaded in " + (now()-startTime)/1000 + " seconds");
       return numEdits;
     } finally {
       edits.close();
@@ -362,10 +361,8 @@ public class FSEditLogLoader {
     }
     case OP_RENAME_OLD: {
       RenameOldOp renameOp = (RenameOldOp)op;
-      HdfsFileStatus dinfo = fsDir.getFileInfo(renameOp.dst, false);
       fsDir.unprotectedRenameTo(renameOp.src, renameOp.dst,
                                 renameOp.timestamp);
-      fsNamesys.unprotectedChangeLease(renameOp.src, renameOp.dst, dinfo);
       break;
     }
     case OP_DELETE: {
@@ -428,18 +425,15 @@ public class FSEditLogLoader {
     }
     case OP_SYMLINK: {
       SymlinkOp symlinkOp = (SymlinkOp)op;
-      fsDir.unprotectedSymlink(symlinkOp.path, symlinkOp.value,
+      fsDir.unprotectedAddSymlink(symlinkOp.path, symlinkOp.value,
                                symlinkOp.mtime, symlinkOp.atime,
                                symlinkOp.permissionStatus);
       break;
     }
     case OP_RENAME: {
       RenameOp renameOp = (RenameOp)op;
-
-      HdfsFileStatus dinfo = fsDir.getFileInfo(renameOp.dst, false);
       fsDir.unprotectedRenameTo(renameOp.src, renameOp.dst,
                                 renameOp.timestamp, renameOp.options);
-      fsNamesys.unprotectedChangeLease(renameOp.src, renameOp.dst, dinfo);
       break;
     }
     case OP_GET_DELEGATION_TOKEN: {
@@ -479,8 +473,8 @@ public class FSEditLogLoader {
       Lease lease = fsNamesys.leaseManager.getLease(
           reassignLeaseOp.leaseHolder);
       INodeFileUnderConstruction pendingFile =
-          (INodeFileUnderConstruction) fsDir.getFileINode(
-              reassignLeaseOp.path);
+          INodeFileUnderConstruction.valueOf( 
+              fsDir.getINode(reassignLeaseOp.path), reassignLeaseOp.path);
       fsNamesys.reassignLeaseInternal(lease,
           reassignLeaseOp.path, reassignLeaseOp.newHolder, pendingFile);
       break;
@@ -594,13 +588,13 @@ public class FSEditLogLoader {
           // what about an old-version fsync() where fsync isn't called
           // until several blocks in?
           newBI = new BlockInfoUnderConstruction(
-              newBlock, file.getReplication());
+              newBlock, file.getBlockReplication());
         } else {
           // OP_CLOSE should add finalized blocks. This code path
           // is only executed when loading edits written by prior
           // versions of Hadoop. Current versions always log
           // OP_ADD operations as each block is allocated.
-          newBI = new BlockInfo(newBlock, file.getReplication());
+          newBI = new BlockInfo(newBlock, file.getBlockReplication());
         }
         fsNamesys.getBlockManager().addBlockCollection(newBI, file);
         file.addBlock(newBI);
@@ -671,7 +665,9 @@ public class FSEditLogLoader {
         FSImage.LOG.warn("Caught exception after reading " + numValid +
             " ops from " + in + " while determining its valid length." +
             "Position was " + lastPos, t);
-        break;
+        in.resync();
+        FSImage.LOG.warn("After resync, position is " + in.getPosition());
+        continue;
       }
       if (lastTxId == HdfsConstants.INVALID_TXID
           || op.getTransactionId() > lastTxId) {

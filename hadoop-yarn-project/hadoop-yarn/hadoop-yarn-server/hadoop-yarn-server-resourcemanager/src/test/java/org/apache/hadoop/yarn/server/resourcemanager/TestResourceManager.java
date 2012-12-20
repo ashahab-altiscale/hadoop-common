@@ -30,8 +30,7 @@ import org.apache.hadoop.net.NetworkTopology;
 import org.apache.hadoop.yarn.api.records.NodeHealthStatus;
 import org.apache.hadoop.yarn.api.records.Priority;
 import org.apache.hadoop.yarn.api.records.Resource;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.Store;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.StoreFactory;
+import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.server.resourcemanager.resource.Resources;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNode;
 import org.junit.After;
@@ -45,9 +44,8 @@ public class TestResourceManager {
   
   @Before
   public void setUp() throws Exception {
-    Configuration conf = new Configuration();
-    Store store = StoreFactory.getStore(conf);
-    resourceManager = new ResourceManager(store);
+    Configuration conf = new YarnConfiguration();
+    resourceManager = new ResourceManager();
     resourceManager.init(conf);
   }
 
