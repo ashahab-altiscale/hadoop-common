@@ -1579,7 +1579,7 @@ public class Balancer {
     }
 
     try {
-      System.exit(ToolRunner.run(new HdfsConfiguration(), new Cli(), args));
+      System.exit(ReturnStatus.SUCCESS == ToolRunner.run(new HdfsConfiguration(), new Cli(), args) ? 0 : 1);
     } catch (Throwable e) {
       LOG.error("Exiting balancer due an exception", e);
       System.exit(-1);
