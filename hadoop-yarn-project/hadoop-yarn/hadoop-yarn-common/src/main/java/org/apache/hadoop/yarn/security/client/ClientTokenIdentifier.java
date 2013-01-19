@@ -27,37 +27,44 @@ import org.apache.hadoop.io.Text;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
-import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
+import org.apache.hadoop.yarn.util.BuilderUtils;
 
 public class ClientTokenIdentifier extends TokenIdentifier {
 
   public static final Text KIND_NAME = new Text("YARN_CLIENT_TOKEN");
 
-  private Text appId;
+  private ApplicationAttemptId applicationAttemptId;
 
   // TODO: Add more information in the tokenID such that it is not
   // transferrable, more secure etc.
 
-  public ClientTokenIdentifier(ApplicationId id) {
-    this.appId = new Text(Integer.toString(id.getId()));
-  }
-
   public ClientTokenIdentifier() {
-    this.appId = new Text();
   }
 
-  public Text getApplicationID() {
-    return appId;
+  public ClientTokenIdentifier(ApplicationAttemptId id) {
+    this();
+    this.applicationAttemptId = id;
+  }
+
+  public ApplicationAttemptId getApplicationAttemptID() {
+    return this.applicationAttemptId;
   }
 
   @Override
   public void write(DataOutput out) throws IOException {
-    appId.write(out);
+    out.writeLong(this.applicationAttemptId.getApplicationId()
+      .getClusterTimestamp());
+    out.writeInt(this.applicationAttemptId.getApplicationId().getId());
+    out.writeInt(this.applicationAttemptId.getAttemptId());
   }
 
   @Override
   public void readFields(DataInput in) throws IOException {
-    appId.readFields(in);
+    this.applicationAttemptId =
+        BuilderUtils.newApplicationAttemptId(
+          BuilderUtils.newApplicationId(in.readLong(), in.readInt()),
+          in.readInt());
   }
 
   @Override
@@ -67,10 +74,10 @@ public class ClientTokenIdentifier extends TokenIdentifier {
 
   @Override
   public UserGroupInformation getUser() {
-    if (appId == null || "".equals(appId.toString())) {
+    if (this.applicationAttemptId == null) {
       return null;
     }
-    return UserGroupInformation.createRemoteUser(appId.toString());
+    return UserGroupInformation.createRemoteUser(this.applicationAttemptId.toString());
   }
 
   @InterfaceAudience.Private

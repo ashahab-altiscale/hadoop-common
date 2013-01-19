@@ -86,7 +86,7 @@ class InvalidateBlocks {
     if (set.add(block)) {
       numBlocks++;
       if (log) {
-        NameNode.stateChangeLog.info("BLOCK* " + getClass().getSimpleName()
+        NameNode.blockStateChangeLog.info("BLOCK* " + getClass().getSimpleName()
             + ": add " + block + " to " + datanode);
       }
     }
@@ -134,26 +134,7 @@ class InvalidateBlocks {
     return new ArrayList<String>(node2blocks.keySet());
   }
 
-  /** Invalidate work for the storage. */
-  int invalidateWork(final String storageId) {
-    final DatanodeDescriptor dn = datanodeManager.getDatanode(storageId);
-    if (dn == null) {
-      remove(storageId);
-      return 0;
-    }
-    final List<Block> toInvalidate = invalidateWork(storageId, dn);
-    if (toInvalidate == null) {
-      return 0;
-    }
-
-    if (NameNode.stateChangeLog.isInfoEnabled()) {
-      NameNode.stateChangeLog.info("BLOCK* " + getClass().getSimpleName()
-          + ": ask " + dn + " to delete " + toInvalidate);
-    }
-    return toInvalidate.size();
-  }
-
-  private synchronized List<Block> invalidateWork(
+  synchronized List<Block> invalidateWork(
       final String storageId, final DatanodeDescriptor dn) {
     final LightWeightHashSet<Block> set = node2blocks.get(storageId);
     if (set == null) {

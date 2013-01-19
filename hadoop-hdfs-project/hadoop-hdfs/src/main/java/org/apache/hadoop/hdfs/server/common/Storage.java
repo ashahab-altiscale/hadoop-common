@@ -42,6 +42,10 @@ import org.apache.hadoop.fs.FileUtil;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.hadoop.util.VersionInfo;
 
+import com.google.common.base.Preconditions;
+
+import com.google.common.base.Charsets;
+
 
 
 /**
@@ -76,7 +80,7 @@ public abstract class Storage extends StorageInfo {
   /** Layout versions of 0.20.203 release */
   public static final int[] LAYOUT_VERSIONS_203 = {-19, -31};
 
-  private   static final String STORAGE_FILE_LOCK     = "in_use.lock";
+  public    static final String STORAGE_FILE_LOCK     = "in_use.lock";
   protected static final String STORAGE_FILE_VERSION  = "VERSION";
   public    static final String STORAGE_DIR_CURRENT   = "current";
   public    static final String STORAGE_DIR_PREVIOUS  = "previous";
@@ -431,7 +435,7 @@ public abstract class Storage extends StorageInfo {
         if (!root.exists()) {
           // storage directory does not exist
           if (startOpt != StartupOption.FORMAT) {
-            LOG.info("Storage directory " + rootPath + " does not exist.");
+            LOG.warn("Storage directory " + rootPath + " does not exist");
             return StorageState.NON_EXISTENT;
           }
           LOG.info(rootPath + " does not exist. Creating ...");
@@ -440,15 +444,15 @@ public abstract class Storage extends StorageInfo {
         }
         // or is inaccessible
         if (!root.isDirectory()) {
-          LOG.info(rootPath + "is not a directory.");
+          LOG.warn(rootPath + "is not a directory");
           return StorageState.NON_EXISTENT;
         }
         if (!root.canWrite()) {
-          LOG.info("Cannot access storage directory " + rootPath);
+          LOG.warn("Cannot access storage directory " + rootPath);
           return StorageState.NON_EXISTENT;
         }
       } catch(SecurityException ex) {
-        LOG.info("Cannot access storage directory " + rootPath, ex);
+        LOG.warn("Cannot access storage directory " + rootPath, ex);
         return StorageState.NON_EXISTENT;
       }
 
@@ -537,34 +541,34 @@ public abstract class Storage extends StorageInfo {
       switch(curState) {
       case COMPLETE_UPGRADE:  // mv previous.tmp -> previous
         LOG.info("Completing previous upgrade for storage directory " 
-                 + rootPath + ".");
+                 + rootPath);
         rename(getPreviousTmp(), getPreviousDir());
         return;
       case RECOVER_UPGRADE:   // mv previous.tmp -> current
         LOG.info("Recovering storage directory " + rootPath
-                 + " from previous upgrade.");
+                 + " from previous upgrade");
         if (curDir.exists())
           deleteDir(curDir);
         rename(getPreviousTmp(), curDir);
         return;
       case COMPLETE_ROLLBACK: // rm removed.tmp
         LOG.info("Completing previous rollback for storage directory "
-                 + rootPath + ".");
+                 + rootPath);
         deleteDir(getRemovedTmp());
         return;
       case RECOVER_ROLLBACK:  // mv removed.tmp -> current
         LOG.info("Recovering storage directory " + rootPath
-                 + " from previous rollback.");
+                 + " from previous rollback");
         rename(getRemovedTmp(), curDir);
         return;
       case COMPLETE_FINALIZE: // rm finalized.tmp
         LOG.info("Completing previous finalize for storage directory "
-                 + rootPath + ".");
+                 + rootPath);
         deleteDir(getFinalizedTmp());
         return;
       case COMPLETE_CHECKPOINT: // mv lastcheckpoint.tmp -> previous.checkpoint
         LOG.info("Completing previous checkpoint for storage directory " 
-                 + rootPath + ".");
+                 + rootPath);
         File prevCkptDir = getPreviousCheckpoint();
         if (prevCkptDir.exists())
           deleteDir(prevCkptDir);
@@ -572,7 +576,7 @@ public abstract class Storage extends StorageInfo {
         return;
       case RECOVER_CHECKPOINT:  // mv lastcheckpoint.tmp -> current
         LOG.info("Recovering storage directory " + rootPath
-                 + " from failed checkpoint.");
+                 + " from failed checkpoint");
         if (curDir.exists())
           deleteDir(curDir);
         rename(getLastCheckpointTmp(), curDir);
@@ -627,7 +631,7 @@ public abstract class Storage extends StorageInfo {
       FileLock newLock = tryLock();
       if (newLock == null) {
         String msg = "Cannot lock storage " + this.root 
-          + ". The directory is already locked.";
+          + ". The directory is already locked";
         LOG.info(msg);
         throw new IOException(msg);
       }
@@ -656,7 +660,7 @@ public abstract class Storage extends StorageInfo {
       FileLock res = null;
       try {
         res = file.getChannel().tryLock();
-        file.write(jvmName.getBytes());
+        file.write(jvmName.getBytes(Charsets.UTF_8));
         LOG.info("Lock on " + lockF + " acquired by nodename " + jvmName);
       } catch(OverlappingFileLockException oe) {
         LOG.error("It appears that another namenode " + file.readLine() 
@@ -750,6 +754,15 @@ public abstract class Storage extends StorageInfo {
   
   public StorageDirectory getStorageDir(int idx) {
     return storageDirs.get(idx);
+  }
+  
+  /**
+   * @return the storage directory, with the precondition that this storage
+   * has exactly one storage directory
+   */
+  public StorageDirectory getSingularStorageDir() {
+    Preconditions.checkState(storageDirs.size() == 1);
+    return storageDirs.get(0);
   }
   
   protected void addStorageDir(StorageDirectory sd) {

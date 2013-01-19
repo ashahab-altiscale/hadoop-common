@@ -22,7 +22,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-
+import static org.mockito.Matchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URI;
@@ -54,6 +56,7 @@ import org.apache.hadoop.util.DataChecksum;
 import org.apache.hadoop.util.Time;
 import org.apache.log4j.Level;
 import org.junit.Test;
+import org.mockito.InOrder;
 
 public class TestDistributedFileSystem {
   private static final Random RAN = new Random();
@@ -116,18 +119,37 @@ public class TestDistributedFileSystem {
       DFSTestUtil.createFile(fileSys, p, 1L, (short)1, 0L);
       DFSTestUtil.readFile(fileSys, p);
       
-      DFSClient client = ((DistributedFileSystem)fileSys).dfs;
-      SocketCache cache = client.socketCache;
-      assertEquals(1, cache.size());
-
       fileSys.close();
       
-      assertEquals(0, cache.size());
     } finally {
       if (cluster != null) {cluster.shutdown();}
     }
   }
+
+  @Test
+  public void testDFSCloseOrdering() throws Exception {
+    DistributedFileSystem fs = new MyDistributedFileSystem();
+    Path path = new Path("/a");
+    fs.deleteOnExit(path);
+    fs.close();
+
+    InOrder inOrder = inOrder(fs.dfs);
+    inOrder.verify(fs.dfs).closeOutputStreams(eq(false));
+    inOrder.verify(fs.dfs).delete(eq(path.toString()), eq(true));
+    inOrder.verify(fs.dfs).close();
+  }
   
+  private static class MyDistributedFileSystem extends DistributedFileSystem {
+    MyDistributedFileSystem() {
+      statistics = new FileSystem.Statistics("myhdfs"); // can't mock finals
+      dfs = mock(DFSClient.class);
+    }
+    @Override
+    public boolean exists(Path p) {
+      return true; // trick out deleteOnExit
+    }
+  }
+
   @Test
   public void testDFSSeekExceptions() throws IOException {
     Configuration conf = getTestConfiguration();
@@ -452,7 +474,7 @@ public class TestDistributedFileSystem {
       fail("Expecting FileNotFoundException");
     } catch (FileNotFoundException e) {
       assertTrue("Not throwing the intended exception message", e.getMessage()
-          .contains("File does not exist: /test/TestExistingDir"));
+          .contains("Path is not a file: /test/TestExistingDir"));
     }
     
     //hftp
@@ -517,6 +539,21 @@ public class TestDistributedFileSystem {
       final Path webhdfsqualified = new Path(webhdfsuri + dir, "foo" + n);
       final FileChecksum webhdfs_qfoocs = webhdfs.getFileChecksum(webhdfsqualified);
       System.out.println("webhdfs_qfoocs=" + webhdfs_qfoocs);
+
+      //create a zero byte file
+      final Path zeroByteFile = new Path(dir, "zeroByteFile" + n);
+      {
+        final FSDataOutputStream out = hdfs.create(zeroByteFile, false, buffer_size,
+            (short)2, block_size);
+        out.close();
+      }
+
+      // verify the magic val for zero byte files
+      {
+        final FileChecksum zeroChecksum = hdfs.getFileChecksum(zeroByteFile);
+        assertEquals(zeroChecksum.toString(),
+            "MD5-of-0MD5-of-0CRC32:70bc8f4b72a86921468bf8e8441dce51");
+      }
 
       //write another file
       final Path bar = new Path(dir, "bar" + n);
@@ -673,7 +710,6 @@ public class TestDistributedFileSystem {
   @Test
   public void testCreateWithCustomChecksum() throws Exception {
     Configuration conf = getTestConfiguration();
-    final long grace = 1000L;
     MiniDFSCluster cluster = null;
     Path testBasePath = new Path("/test/csum");
     // create args 

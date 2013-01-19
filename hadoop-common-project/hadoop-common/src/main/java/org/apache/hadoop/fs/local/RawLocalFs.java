@@ -85,7 +85,7 @@ public class RawLocalFs extends DelegateToFileSystem {
                             "system: "+target.toString());
     }
     if (createParent) {
-      mkdir(link.getParent(), FsPermission.getDefault(), true);
+      mkdir(link.getParent(), FsPermission.getDirDefault(), true);
     }
     // NB: Use createSymbolicLink in java.nio.file.Path once available
     try {
@@ -158,6 +158,14 @@ public class RawLocalFs extends DelegateToFileSystem {
       throw e;
     }
   }
+  
+   @Override
+   public boolean isValidName(String src) {
+     // Different local file systems have different validation rules.  Skip
+     // validation here and just let the OS handle it.  This is consistent with
+     // RawLocalFileSystem.
+     return true;
+   }
   
   @Override
   public Path getLinkTarget(Path f) throws IOException {

@@ -105,6 +105,8 @@ import org.apache.hadoop.security.token.delegation.AbstractDelegationTokenSelect
 import org.apache.hadoop.util.Progressable;
 import org.mortbay.util.ajax.JSON;
 
+import com.google.common.base.Charsets;
+
 /** A FileSystem for HDFS over the web. */
 public class WebHdfsFileSystem extends FileSystem
     implements DelegationTokenRenewer.Renewable {
@@ -124,15 +126,14 @@ public class WebHdfsFileSystem extends FileSystem
   public static final WebHdfsDelegationTokenSelector DT_SELECTOR
       = new WebHdfsDelegationTokenSelector();
 
-  private static DelegationTokenRenewer<WebHdfsFileSystem> DT_RENEWER = null;
+  private DelegationTokenRenewer dtRenewer = null;
 
-  private static synchronized void addRenewAction(final WebHdfsFileSystem webhdfs) {
-    if (DT_RENEWER == null) {
-      DT_RENEWER = new DelegationTokenRenewer<WebHdfsFileSystem>(WebHdfsFileSystem.class);
-      DT_RENEWER.start();
+  private synchronized void addRenewAction(final WebHdfsFileSystem webhdfs) {
+    if (dtRenewer == null) {
+      dtRenewer = DelegationTokenRenewer.getInstance();
     }
 
-    DT_RENEWER.addRenewAction(webhdfs);
+    dtRenewer.addRenewAction(webhdfs);
   }
 
   /** Is WebHDFS enabled in conf? */
@@ -282,7 +283,7 @@ public class WebHdfsFileSystem extends FileSystem
             + "\" (parsed=\"" + parsed + "\")");
       }
     }
-    return (Map<?, ?>)JSON.parse(new InputStreamReader(in));
+    return (Map<?, ?>)JSON.parse(new InputStreamReader(in, Charsets.UTF_8));
   }
 
   private static Map<?, ?> validateResponse(final HttpOpParam.Op op,
@@ -764,6 +765,14 @@ public class WebHdfsFileSystem extends FileSystem
     final URL url = toUrl(op, f, new BufferSizeParam(buffersize));
     return new FSDataInputStream(new OffsetUrlInputStream(
         new OffsetUrlOpener(url), new OffsetUrlOpener(null)));
+  }
+
+  @Override
+  public void close() throws IOException {
+    super.close();
+    if (dtRenewer != null) {
+      dtRenewer.removeRenewAction(this); // blocks
+    }
   }
 
   class OffsetUrlOpener extends ByteRangeInputStream.URLOpener {

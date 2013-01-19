@@ -36,9 +36,7 @@ import org.apache.hadoop.yarn.api.records.NodeId;
 import org.apache.hadoop.yarn.api.records.NodeState;
 import org.apache.hadoop.yarn.event.EventHandler;
 import org.apache.hadoop.yarn.server.api.records.HeartbeatResponse;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.MemStore;
 import org.apache.hadoop.yarn.server.resourcemanager.resourcetracker.InlineDispatcher;
-import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNode;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNodeCleanContainerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNodeEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNodeEventType;
@@ -80,8 +78,8 @@ public class TestRMNodeTransitions {
     InlineDispatcher rmDispatcher = new InlineDispatcher();
     
     rmContext =
-        new RMContextImpl(new MemStore(), rmDispatcher, null, null, null,
-            mock(DelegationTokenRenewer.class), null, null);
+        new RMContextImpl(rmDispatcher, null, null, null,
+            mock(DelegationTokenRenewer.class), null, null, null);
     scheduler = mock(YarnScheduler.class);
     doAnswer(
         new Answer<Void>() {

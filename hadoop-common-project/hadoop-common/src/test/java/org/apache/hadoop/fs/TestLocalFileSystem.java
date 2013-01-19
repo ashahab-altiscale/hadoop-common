@@ -19,12 +19,14 @@ package org.apache.hadoop.fs;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem.Statistics;
+import org.apache.hadoop.util.Shell;
 
 import static org.apache.hadoop.fs.FileSystemTestHelper.*;
 
 import java.io.*;
 
 import static org.junit.Assert.*;
+import static org.junit.Assume.assumeTrue;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -249,6 +251,7 @@ public class TestLocalFileSystem {
     assertEquals(1, fileSchemeCount);
   }
 
+  @Test
   public void testHasFileDescriptor() throws IOException {
     Configuration conf = new Configuration();
     LocalFileSystem fs = FileSystem.getLocal(conf);
@@ -257,5 +260,19 @@ public class TestLocalFileSystem {
     BufferedFSInputStream bis = new BufferedFSInputStream(
         new RawLocalFileSystem().new LocalFSFileInputStream(path), 1024);
     assertNotNull(bis.getFileDescriptor());
+  }
+
+  @Test
+  public void testListStatusWithColons() throws IOException {
+    assumeTrue(!Shell.WINDOWS);
+    Configuration conf = new Configuration();
+    LocalFileSystem fs = FileSystem.getLocal(conf);
+    File colonFile = new File(TEST_ROOT_DIR, "foo:bar");
+    colonFile.mkdirs();
+    colonFile.createNewFile();
+    FileStatus[] stats = fs.listStatus(new Path(TEST_ROOT_DIR));
+    assertEquals("Unexpected number of stats", 1, stats.length);
+    assertEquals("Bad path from stat", colonFile.getAbsolutePath(),
+        stats[0].getPath().toUri().getPath());
   }
 }

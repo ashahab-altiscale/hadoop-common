@@ -59,6 +59,7 @@ import org.apache.hadoop.hdfs.web.resources.DelegationParam;
 import org.apache.hadoop.hdfs.web.resources.DoAsParam;
 import org.apache.hadoop.hdfs.web.resources.UserParam;
 import org.apache.hadoop.http.HtmlQuoting;
+import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.AccessControlException;
 import org.apache.hadoop.security.SecurityUtil;
@@ -68,6 +69,8 @@ import org.apache.hadoop.security.authentication.util.KerberosName;
 import org.apache.hadoop.security.authorize.ProxyUsers;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.util.VersionInfo;
+
+import com.google.common.base.Charsets;
 
 import static org.apache.hadoop.fs.CommonConfigurationKeys.HADOOP_HTTP_STATIC_USER;
 import static org.apache.hadoop.fs.CommonConfigurationKeys.DEFAULT_HADOOP_HTTP_STATIC_USER;
@@ -178,7 +181,7 @@ public class JspHelper {
         s.setSoTimeout(HdfsServerConstants.READ_TIMEOUT);
       } catch (IOException e) {
         deadNodes.add(chosenNode);
-        s.close();
+        IOUtils.closeSocket(s);
         s = null;
         failures++;
       }
@@ -228,7 +231,7 @@ public class JspHelper {
     }
     blockReader = null;
     s.close();
-    out.print(HtmlQuoting.quoteHtmlChars(new String(buf)));
+    out.print(HtmlQuoting.quoteHtmlChars(new String(buf, Charsets.UTF_8)));
   }
 
   public static void addTableHeader(JspWriter out) throws IOException {
@@ -276,6 +279,9 @@ public class JspHelper {
         FIELD_PERCENT_REMAINING = 9,
         FIELD_ADMIN_STATE       = 10,
         FIELD_DECOMMISSIONED    = 11,
+        FIELD_BLOCKPOOL_USED    = 12,
+        FIELD_PERBLOCKPOOL_USED = 13,
+        FIELD_FAILED_VOLUMES    = 14,
         SORT_ORDER_ASC          = 1,
         SORT_ORDER_DSC          = 2;
 
@@ -303,6 +309,12 @@ public class JspHelper {
           sortField = FIELD_ADMIN_STATE;
         } else if (field.equals("decommissioned")) {
           sortField = FIELD_DECOMMISSIONED;
+        } else if (field.equals("bpused")) {
+          sortField = FIELD_BLOCKPOOL_USED;
+        } else if (field.equals("pcbpused")) {
+          sortField = FIELD_PERBLOCKPOOL_USED;
+        } else if (field.equals("volfails")) {
+          sortField = FIELD_FAILED_VOLUMES;
         } else {
           sortField = FIELD_NAME;
         }
@@ -361,6 +373,20 @@ public class JspHelper {
         case FIELD_NAME: 
           ret = d1.getHostName().compareTo(d2.getHostName());
           break;
+        case FIELD_BLOCKPOOL_USED:
+          dlong = d1.getBlockPoolUsed() - d2.getBlockPoolUsed();
+          ret = (dlong < 0) ? -1 : ((dlong > 0) ? 1 : 0);
+          break;
+        case FIELD_PERBLOCKPOOL_USED:
+          ddbl = d1.getBlockPoolUsedPercent() - d2.getBlockPoolUsedPercent();
+          ret = (ddbl < 0) ? -1 : ((ddbl > 0) ? 1 : 0);
+          break;
+        case FIELD_FAILED_VOLUMES:
+          int dint = d1.getVolumeFailures() - d2.getVolumeFailures();
+          ret = (dint < 0) ? -1 : ((dint > 0) ? 1 : 0);
+          break;
+        default:
+          throw new IllegalArgumentException("Invalid sortField");
         }
         return (sortOrder == SORT_ORDER_DSC) ? -ret : ret;
       }
@@ -387,15 +413,15 @@ public class JspHelper {
         if (!parts[i].equals("")) {
           tempPath.append(parts[i]);
           out.print("<a href=\"browseDirectory.jsp" + "?dir="
-              + tempPath.toString() + "&namenodeInfoPort=" + namenodeInfoPort
+              + HtmlQuoting.quoteHtmlChars(tempPath.toString()) + "&namenodeInfoPort=" + namenodeInfoPort
               + getDelegationTokenUrlParam(tokenString)
               + getUrlParam(NAMENODE_ADDRESS, nnAddress));
-          out.print("\">" + parts[i] + "</a>" + Path.SEPARATOR);
+          out.print("\">" + HtmlQuoting.quoteHtmlChars(parts[i]) + "</a>" + Path.SEPARATOR);
           tempPath.append(Path.SEPARATOR);
         }
       }
       if(parts.length > 0) {
-        out.print(parts[parts.length-1]);
+        out.print(HtmlQuoting.quoteHtmlChars(parts[parts.length-1]));
       }
     }
     catch (UnsupportedEncodingException ex) {
@@ -410,16 +436,16 @@ public class JspHelper {
                                    String nnAddress) throws IOException {
     out.print("<form action=\"browseDirectory.jsp\" method=\"get\" name=\"goto\">");
     out.print("Goto : ");
-    out.print("<input name=\"dir\" type=\"text\" width=\"50\" id\"dir\" value=\""+ file+"\">");
-    out.print("<input name=\"go\" type=\"submit\" value=\"go\">");
+    out.print("<input name=\"dir\" type=\"text\" width=\"50\" id=\"dir\" value=\""+ HtmlQuoting.quoteHtmlChars(file)+"\"/>");
+    out.print("<input name=\"go\" type=\"submit\" value=\"go\"/>");
     out.print("<input name=\"namenodeInfoPort\" type=\"hidden\" "
-        + "value=\"" + namenodeInfoPort  + "\">");
+        + "value=\"" + namenodeInfoPort  + "\"/>");
     if (UserGroupInformation.isSecurityEnabled()) {
       out.print("<input name=\"" + DELEGATION_PARAMETER_NAME
-          + "\" type=\"hidden\" value=\"" + tokenString + "\">");
+          + "\" type=\"hidden\" value=\"" + tokenString + "\"/>");
     }
     out.print("<input name=\""+ NAMENODE_ADDRESS +"\" type=\"hidden\" "
-        + "value=\"" + nnAddress  + "\">");
+        + "value=\"" + nnAddress  + "\"/>");
     out.print("</form>");
   }
   

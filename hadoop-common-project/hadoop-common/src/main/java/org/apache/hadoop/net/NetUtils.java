@@ -25,6 +25,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.NoRouteToHostException;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketException;
@@ -355,9 +356,8 @@ public class NetUtils {
   }
   
   /**
-   * Returns the InetSocketAddress that a client can use to connect to the
-   * given listening address.  This returns "hostname:port" of the server,
-   * or "127.0.0.1:port" when given a wildcard address of "0.0.0.0:port".
+   * Returns an InetSocketAddress that a client can use to connect to the
+   * given listening address.
    * 
    * @param addr of a listener
    * @return socket address that a client can use to connect to the server.
@@ -865,5 +865,24 @@ public class NetUtils {
       }
     }
     return addrs;
+  }
+
+  /**
+   * Return a free port number. There is no guarantee it will remain free, so
+   * it should be used immediately.
+   *
+   * @returns A free port for binding a local socket
+   */
+  public static int getFreeSocketPort() {
+    int port = 0;
+    try {
+      ServerSocket s = new ServerSocket(0);
+      port = s.getLocalPort();
+      s.close();
+      return port;
+    } catch (IOException e) {
+      // Could not get a free port. Return default port 0.
+    }
+    return port;
   }
 }

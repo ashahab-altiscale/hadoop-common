@@ -23,6 +23,17 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xs
   <name>Apache Hadoop Main</name>
   <packaging>pom</packaging>
 
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.cenqua.clover</groupId>
+        <artifactId>clover</artifactId>
+        <!-- Use the version needed by maven-clover-plugin -->
+        <version>3.0.2</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
   <distributionManagement>
     <repository>
       <id>apache.staging.https</id>
@@ -76,6 +87,7 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xs
     <module>hadoop-project</module>
     <module>hadoop-project-dist</module>
     <module>hadoop-assemblies</module>
+    <module>hadoop-maven-plugins</module>
     <module>hadoop-common-project</module>
     <module>hadoop-hdfs-project</module>
     <module>hadoop-yarn-project</module>
@@ -243,6 +255,11 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xs
             </lifecycleMappingMetadata>
           </configuration>
         </plugin>
+        <plugin>
+          <groupId>com.atlassian.maven.plugins</groupId>
+          <artifactId>maven-clover2-plugin</artifactId>
+          <version>3.0.5</version>
+        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -278,12 +295,14 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xs
       <plugin>
         <groupId>org.apache.rat</groupId>
         <artifactId>apache-rat-plugin</artifactId>
-        <configuration>
-          <includes>
-            <include>dev-support/*</include>
-            <include>pom.xml</include>
-          </includes>
-        </configuration>
+       <configuration>
+          <excludes>
+            <exclude>.gitattributes</exclude>
+            <exclude>.gitignore</exclude>
+            <exclude>.git/**</exclude>
+            <exclude>.idea/**</exclude>
+         </excludes>
+       </configuration>
       </plugin>
       <plugin>
         <artifactId>maven-site-plugin</artifactId>
@@ -483,6 +502,52 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xs
         </plugins>
       </build>
     </profile>
-
+    <profile>
+      <id>clover</id>
+      <activation>
+        <activeByDefault>false</activeByDefault>
+        <property>
+          <name>clover</name>
+        </property>
+      </activation>
+      <properties>
+        <cloverLicenseLocation>${user.home}/.clover.license</cloverLicenseLocation>
+        <cloverDatabase>${project.build.directory}/clover/hadoop-coverage.db</cloverDatabase>
+      </properties>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>com.atlassian.maven.plugins</groupId>
+            <artifactId>maven-clover2-plugin</artifactId>
+            <configuration>
+              <includesAllSourceRoots>false</includesAllSourceRoots>
+              <includesTestSourceRoots>true</includesTestSourceRoots>
+              <licenseLocation>${cloverLicenseLocation}</licenseLocation>
+              <cloverDatabase>${cloverDatabase}</cloverDatabase>
+              <targetPercentage>50%</targetPercentage>
+              <outputDirectory>${project.build.directory}/clover</outputDirectory>
+              <generateHtml>true</generateHtml>
+              <generateXml>true</generateXml>
+            </configuration>
+            <executions>
+              <execution>
+                <id>clover-setup</id>
+                <phase>process-sources</phase>
+                <goals>
+                  <goal>setup</goal>
+                </goals>
+              </execution>
+              <execution>
+                <id>clover</id>
+                <phase>test</phase>
+                <goals>
+                  <goal>clover</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
   </profiles>
 </project>

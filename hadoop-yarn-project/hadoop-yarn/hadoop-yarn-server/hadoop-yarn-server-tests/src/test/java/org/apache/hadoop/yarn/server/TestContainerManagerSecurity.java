@@ -218,10 +218,11 @@ public class TestContainerManagerSecurity {
     dummyIdentifier.readFields(di);
 
     // Malice user modifies the resource amount
-    Resource modifiedResource = BuilderUtils.newResource(2048);
-    ContainerTokenIdentifier modifiedIdentifier = new ContainerTokenIdentifier(
-        dummyIdentifier.getContainerID(), dummyIdentifier.getNmHostAddress(),
-        modifiedResource, Long.MAX_VALUE, dummyIdentifier.getMasterKeyId());
+    Resource modifiedResource = BuilderUtils.newResource(2048, 1);
+    ContainerTokenIdentifier modifiedIdentifier =
+        new ContainerTokenIdentifier(dummyIdentifier.getContainerID(),
+          dummyIdentifier.getNmHostAddress(), "testUser", modifiedResource,
+          Long.MAX_VALUE, dummyIdentifier.getMasterKeyId());
     Token<ContainerTokenIdentifier> modifiedToken = new Token<ContainerTokenIdentifier>(
         modifiedIdentifier.getBytes(), containerToken.getPassword().array(),
         new Text(containerToken.getKind()), new Text(containerToken
@@ -320,12 +321,14 @@ public class TestContainerManagerSecurity {
 
         callWithIllegalContainerID(client, tokenId);
         callWithIllegalResource(client, tokenId);
+        callWithIllegalUserName(client, tokenId);
 
         return client;
       }
     });
     
-    /////////// End of testing for illegal containerIDs and illegal Resources
+    // ///////// End of testing for illegal containerIDs, illegal Resources and
+    // illegal users
 
     /////////// Test calls with expired tokens
     RPC.stopProxy(client);
@@ -336,7 +339,7 @@ public class TestContainerManagerSecurity {
       resourceManager.getRMContainerTokenSecretManager(); 
     final ContainerTokenIdentifier newTokenId =
         new ContainerTokenIdentifier(tokenId.getContainerID(),
-          tokenId.getNmHostAddress(), tokenId.getResource(),
+          tokenId.getNmHostAddress(), "testUser", tokenId.getResource(),
           System.currentTimeMillis() - 1, 
           containerTokenSecreteManager.getCurrentKey().getKeyId());
     byte[] passowrd =
@@ -346,9 +349,7 @@ public class TestContainerManagerSecurity {
     token = new Token<ContainerTokenIdentifier>(
         newTokenId.getBytes(), passowrd, new Text(
             containerToken.getKind()), new Text(containerToken.getService()));
-    
-    
-    
+
     unauthorizedUser.addToken(token);
     unauthorizedUser.doAs(new PrivilegedAction<Void>() {
       @Override
@@ -400,23 +401,9 @@ public class TestContainerManagerSecurity {
       UnsupportedFileSystemException, YarnRemoteException,
       InterruptedException {
 
-    // TODO: Use a resource to work around bugs. Today NM doesn't create local
-    // app-dirs if there are no file to download!!
-    String fileName = "testFile-" + appID.toString();
-    File testFile = new File(localDir.getAbsolutePath(), fileName);
-    FileWriter tmpFile = new FileWriter(testFile);
-    tmpFile.write("testing");
-    tmpFile.close();
-    URL testFileURL = ConverterUtils.getYarnUrlFromPath(FileContext
-        .getFileContext().makeQualified(
-            new Path(localDir.getAbsolutePath(), fileName)));
-    LocalResource rsrc = BuilderUtils.newLocalResource(testFileURL,
-        LocalResourceType.FILE, LocalResourceVisibility.PRIVATE, testFile
-            .length(), testFile.lastModified());
-
     ContainerLaunchContext amContainer = BuilderUtils
         .newContainerLaunchContext(null, "testUser", BuilderUtils
-            .newResource(1024), Collections.singletonMap(fileName, rsrc),
+            .newResource(1024, 1), Collections.<String, LocalResource>emptyMap(),
             new HashMap<String, String>(), Arrays.asList("sleep", "100"),
             new HashMap<String, ByteBuffer>(), null,
             new HashMap<ApplicationAccessType, String>());
@@ -494,7 +481,7 @@ public class TestContainerManagerSecurity {
     // Request a container allocation.
     List<ResourceRequest> ask = new ArrayList<ResourceRequest>();
     ask.add(BuilderUtils.newResourceRequest(BuilderUtils.newPriority(0), "*",
-        BuilderUtils.newResource(1024), 1));
+        BuilderUtils.newResource(1024, 1), 1));
 
     AllocateRequest allocateRequest = BuilderUtils.newAllocateRequest(
         BuilderUtils.newApplicationAttemptId(appID, 1), 0, 0F, ask,
@@ -567,12 +554,37 @@ public class TestContainerManagerSecurity {
     }
   }
 
+  void callWithIllegalUserName(ContainerManager client,
+      ContainerTokenIdentifier tokenId) {
+    StartContainerRequest request = recordFactory
+        .newRecordInstance(StartContainerRequest.class);
+    // Authenticated but unauthorized, due to wrong resource
+    ContainerLaunchContext context =
+        createContainerLaunchContextForTest(tokenId);
+    context.setUser("Saruman"); // Set a different user-name.
+    request.setContainerLaunchContext(context);
+    try {
+      client.startContainer(request);
+      fail("Connection initiation with unauthorized "
+          + "access is expected to fail.");
+    } catch (YarnRemoteException e) {
+      LOG.info("Got exception : ", e);
+      Assert.assertTrue(e.getMessage().contains(
+          "Unauthorized request to start container. "));
+      Assert.assertTrue(e.getMessage().contains(
+        "Expected user-name " + tokenId.getApplicationSubmitter()
+            + " but found " + context.getUser()));
+    }
+  }
+
   private ContainerLaunchContext createContainerLaunchContextForTest(
       ContainerTokenIdentifier tokenId) {
     ContainerLaunchContext context =
         BuilderUtils.newContainerLaunchContext(tokenId.getContainerID(),
             "testUser",
-            BuilderUtils.newResource(tokenId.getResource().getMemory()),
+            BuilderUtils.newResource(
+                tokenId.getResource().getMemory(), 
+                tokenId.getResource().getVirtualCores()),
             new HashMap<String, LocalResource>(),
             new HashMap<String, String>(), new ArrayList<String>(),
             new HashMap<String, ByteBuffer>(), null,

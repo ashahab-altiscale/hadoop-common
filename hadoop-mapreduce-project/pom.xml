@@ -149,7 +149,6 @@
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
-      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.jboss.netty</groupId>
@@ -215,9 +214,11 @@
         <groupId>org.apache.rat</groupId>
         <artifactId>apache-rat-plugin</artifactId>
         <configuration>
-          <includes>
-            <include>pom.xml</include>
-          </includes>
+          <excludes>
+            <exclude>.eclipse.templates/</exclude>
+            <exclude>CHANGES.txt</exclude>
+            <exclude>lib/jdiff/**</exclude>
+          </excludes>
         </configuration>
       </plugin>
       <plugin>

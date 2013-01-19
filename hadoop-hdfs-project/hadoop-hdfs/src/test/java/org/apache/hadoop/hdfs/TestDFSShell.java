@@ -35,6 +35,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.Scanner;
+import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPOutputStream;
 
 import org.apache.commons.logging.Log;
@@ -52,7 +53,10 @@ import org.apache.hadoop.hdfs.tools.DFSAdmin;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.io.SequenceFile;
 import org.apache.hadoop.io.Text;
+import org.apache.hadoop.io.compress.BZip2Codec;
+import org.apache.hadoop.io.compress.CompressionCodec;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.util.ToolRunner;
 import org.junit.Test;
@@ -448,6 +452,15 @@ public class TestDFSShell {
       assertEquals(" no error ", 0, ret);
       assertTrue("empty path specified",
           (returned.lastIndexOf("empty string") == -1));
+      out.reset();
+      argv = new String[3];
+      argv[0] = "-test";
+      argv[1] = "-d";
+      argv[2] = "/no/such/dir";
+      ret = ToolRunner.run(shell, argv);
+      returned = out.toString();
+      assertEquals(" -test -d wrong result ", 1, ret);
+      assertTrue(returned.isEmpty());
     } finally {
       if (bak != null) {
         System.setErr(bak);
@@ -577,6 +590,8 @@ public class TestDFSShell {
     try {
       final FileSystem fs = root.getFileSystem(conf);
       fs.mkdirs(root);
+
+      // Test the gzip type of files. Magic detection.
       OutputStream zout = new GZIPOutputStream(
           fs.create(new Path(root, "file.gz")));
       Random r = new Random();
@@ -601,7 +616,7 @@ public class TestDFSShell {
           Arrays.equals(file.toByteArray(), out.toByteArray()));
 
       // Create a sequence file with a gz extension, to test proper
-      // container detection
+      // container detection. Magic detection.
       SequenceFile.Writer writer = SequenceFile.createWriter(
           conf,
           SequenceFile.Writer.file(new Path(root, "file.gz")),
@@ -618,6 +633,45 @@ public class TestDFSShell {
       assertEquals("'-text " + argv[1] + " returned " + ret, 0, ret);
       assertTrue("Output doesn't match input",
           Arrays.equals("Foo\tBar\n".getBytes(), out.toByteArray()));
+      out.reset();
+
+      // Test deflate. Extension-based detection.
+      OutputStream dout = new DeflaterOutputStream(
+          fs.create(new Path(root, "file.deflate")));
+      byte[] outbytes = "foo".getBytes();
+      dout.write(outbytes);
+      dout.close();
+      out = new ByteArrayOutputStream();
+      System.setOut(new PrintStream(out));
+      argv = new String[2];
+      argv[0] = "-text";
+      argv[1] = new Path(root, "file.deflate").toString();
+      ret = ToolRunner.run(new FsShell(conf), argv);
+      assertEquals("'-text " + argv[1] + " returned " + ret, 0, ret);
+      assertTrue("Output doesn't match input",
+          Arrays.equals(outbytes, out.toByteArray()));
+      out.reset();
+
+      // Test a simple codec. Extension based detection. We use
+      // Bzip2 cause its non-native.
+      CompressionCodec codec = (CompressionCodec)
+          ReflectionUtils.newInstance(BZip2Codec.class, conf);
+      String extension = codec.getDefaultExtension();
+      Path p = new Path(root, "file." + extension);
+      OutputStream fout = new DataOutputStream(codec.createOutputStream(
+          fs.create(p, true)));
+      byte[] writebytes = "foo".getBytes();
+      fout.write(writebytes);
+      fout.close();
+      out = new ByteArrayOutputStream();
+      System.setOut(new PrintStream(out));
+      argv = new String[2];
+      argv[0] = "-text";
+      argv[1] = new Path(root, p).toString();
+      ret = ToolRunner.run(new FsShell(conf), argv);
+      assertEquals("'-text " + argv[1] + " returned " + ret, 0, ret);
+      assertTrue("Output doesn't match input",
+          Arrays.equals(writebytes, out.toByteArray()));
       out.reset();
     } finally {
       if (null != bak) {
@@ -1100,7 +1154,7 @@ public class TestDFSShell {
 
         args = new String[2];
         args[0] = "-touchz";
-        args[1] = "/test/mkdirs/noFileHere";
+        args[1] = "/test/mkdirs/isFileHere";
         val = -1;
         try {
           val = shell.run(args);
@@ -1112,7 +1166,7 @@ public class TestDFSShell {
 
         args = new String[2];
         args[0] = "-touchz";
-        args[1] = "/test/mkdirs/thisDirNotExists/noFileHere";
+        args[1] = "/test/mkdirs/thisDirNotExists/isFileHere";
         val = -1;
         try {
           val = shell.run(args);
@@ -1126,7 +1180,7 @@ public class TestDFSShell {
         args = new String[3];
         args[0] = "-test";
         args[1] = "-e";
-        args[2] = "/test/mkdirs/noFileHere";
+        args[2] = "/test/mkdirs/isFileHere";
         val = -1;
         try {
           val = shell.run(args);
@@ -1198,7 +1252,106 @@ public class TestDFSShell {
         }
         assertEquals(0, val);
       }
-        
+
+      // Verify -test -f negative case (missing file)
+      {
+        String[] args = new String[3];
+        args[0] = "-test";
+        args[1] = "-f";
+        args[2] = "/test/mkdirs/noFileHere";
+        int val = -1;
+        try {
+          val = shell.run(args);
+        } catch (Exception e) {
+          System.err.println("Exception raised from DFSShell.run " +
+                             e.getLocalizedMessage());
+        }
+        assertEquals(1, val);
+      }
+
+      // Verify -test -f negative case (directory rather than file)
+      {
+        String[] args = new String[3];
+        args[0] = "-test";
+        args[1] = "-f";
+        args[2] = "/test/mkdirs";
+        int val = -1;
+        try {
+          val = shell.run(args);
+        } catch (Exception e) {
+          System.err.println("Exception raised from DFSShell.run " +
+                             e.getLocalizedMessage());
+        }
+        assertEquals(1, val);
+      }
+
+      // Verify -test -f positive case
+      {
+        writeFile(fileSys, myFile);
+        assertTrue(fileSys.exists(myFile));
+
+        String[] args = new String[3];
+        args[0] = "-test";
+        args[1] = "-f";
+        args[2] = myFile.toString();
+        int val = -1;
+        try {
+          val = shell.run(args);
+        } catch (Exception e) {
+          System.err.println("Exception raised from DFSShell.run " +
+                             e.getLocalizedMessage());
+        }
+        assertEquals(0, val);
+      }
+
+      // Verify -test -s negative case (missing file)
+      {
+        String[] args = new String[3];
+        args[0] = "-test";
+        args[1] = "-s";
+        args[2] = "/test/mkdirs/noFileHere";
+        int val = -1;
+        try {
+          val = shell.run(args);
+        } catch (Exception e) {
+          System.err.println("Exception raised from DFSShell.run " +
+                             e.getLocalizedMessage());
+        }
+        assertEquals(1, val);
+      }
+
+      // Verify -test -s negative case (zero length file)
+      {
+        String[] args = new String[3];
+        args[0] = "-test";
+        args[1] = "-s";
+        args[2] = "/test/mkdirs/isFileHere";
+        int val = -1;
+        try {
+          val = shell.run(args);
+        } catch (Exception e) {
+          System.err.println("Exception raised from DFSShell.run " +
+                             e.getLocalizedMessage());
+        }
+        assertEquals(1, val);
+      }
+
+      // Verify -test -s positive case (nonzero length file)
+      {
+        String[] args = new String[3];
+        args[0] = "-test";
+        args[1] = "-s";
+        args[2] = myFile.toString();
+        int val = -1;
+        try {
+          val = shell.run(args);
+        } catch (Exception e) {
+          System.err.println("Exception raised from DFSShell.run " +
+                             e.getLocalizedMessage());
+        }
+        assertEquals(0, val);
+      }
+
     } finally {
       try {
         fileSys.close();
