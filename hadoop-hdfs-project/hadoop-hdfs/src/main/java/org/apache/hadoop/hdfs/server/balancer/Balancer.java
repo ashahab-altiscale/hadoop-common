@@ -18,7 +18,8 @@
 package org.apache.hadoop.hdfs.server.balancer;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static org.apache.hadoop.hdfs.protocol.HdfsProtoUtil.vintPrefixed;
+
+import static org.apache.hadoop.hdfs.protocolPB.PBHelper.vintPrefixed;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -1359,7 +1360,7 @@ public class Balancer {
             " in this iteration");
       }
 
-      formatter.format("%-24s %10d  %19s  %18s  %17s\n", 
+      formatter.format("%-24s %10d  %19s  %18s  %17s%n",
           DateFormat.getDateTimeInstance().format(new Date()),
           iteration,
           StringUtils.byteDesc(bytesMoved.get()),
