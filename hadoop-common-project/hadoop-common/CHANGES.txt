@@ -129,6 +129,14 @@ Release 2.0.3-alpha - Unreleased
     HADOOP-9216. CompressionCodecFactory#getCodecClasses should trim the
     result of parsing by Configuration. (Tsuyoshi Ozawa via todd)
 
+    HADOOP-9231. Parametrize staging URL for the uniformity of
+    distributionManagement. (Konstantin Boudnik via suresh)
+
+    HADOOP-9241. DU refresh interval is not configurable (harsh)
+
+    HADOOP-9247. Parametrize Clover "generateXxx" properties to make them
+    re-definable via -D in mvn calls. (Ivan A. Veselovsky via suresh)
+
   OPTIMIZATIONS
 
     HADOOP-8866. SampleQuantiles#query is O(N^2) instead of O(N). (Andrew Wang
@@ -258,6 +266,9 @@ Release 2.0.3-alpha - Unreleased
 
     HADOOP-9215. when using cmake-2.6, libhadoop.so doesn't get created
     (only libhadoop.so.1.0.0) (Colin Patrick McCabe via todd)
+
+    HADOOP-8857. hadoop.http.authentication.signature.secret.file docs 
+    should not state that secret is randomly generated. (tucu)
 
 Release 2.0.2-alpha - 2012-09-07 
 
