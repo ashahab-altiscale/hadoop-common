@@ -1328,6 +1328,23 @@ public class Balancer {
     ReturnStatus(int code) {
       this.code = code;
     }
+    
+    int toExitCode() {
+      return toExitCode(this.code);
+    }
+
+    static int toExitCode(int code) {
+      switch (code) {
+        case 1:
+        case 0:
+
+          return 0;
+
+        default:
+
+          return 1;
+      }
+    }
   }
 
   /** Run an iteration for all datanodes. */
@@ -1494,7 +1511,12 @@ public class Balancer {
   }
 
   static class Cli extends Configured implements Tool {
-    /** Parse arguments and then run Balancer */
+    /**
+     * Parse arguments and then run Balancer.
+     * 
+     * @param args command specific arguments.
+     * @return exit code. 0 indicates success, non-zero indicates failure.
+     */
     @Override
     public int run(String[] args) {
       final long startTime = Time.now();
@@ -1507,13 +1529,14 @@ public class Balancer {
         checkReplicationPolicyCompatibility(conf);
 
         final Collection<URI> namenodes = DFSUtil.getNsServiceRpcUris(conf);
-        return Balancer.run(namenodes, parse(args), conf);
+        return ReturnStatus.toExitCode(
+                Balancer.run(namenodes, parse(args), conf));
       } catch (IOException e) {
         System.out.println(e + ".  Exiting ...");
-        return ReturnStatus.IO_EXCEPTION.code;
+        return ReturnStatus.IO_EXCEPTION.toExitCode();
       } catch (InterruptedException e) {
         System.out.println(e + ".  Exiting ...");
-        return ReturnStatus.INTERRUPTED.code;
+        return ReturnStatus.INTERRUPTED.toExitCode();
       } finally {
         System.out.println("Balancing took " + time2Str(Time.now()-startTime));
       }
