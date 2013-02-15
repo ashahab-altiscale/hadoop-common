@@ -20,10 +20,13 @@ package org.apache.hadoop.fs.s3;
 import java.net.URI;
 
 import junit.framework.TestCase;
+import org.junit.Test;
 
 import org.apache.hadoop.conf.Configuration;
 
 public class TestS3Credentials extends TestCase {
+
+  @Test
   public void testInvalidHostnameWithUnderscores() throws Exception {
     S3Credentials s3Credentials = new S3Credentials();
     try {
@@ -33,4 +36,13 @@ public class TestS3Credentials extends TestCase {
       assertEquals("Invalid hostname in URI s3://a:b@c_d", e.getMessage());
     }
   }
+
+  @Test
+  public void testUserInfo() throws Exception {
+    S3Credentials s3Credentials = new S3Credentials();
+    s3Credentials.initialize(new URI("s3://access_key:+MyVerysecret%2FK3y@s3.hostname.com"), new Configuration());
+    assertEquals(s3Credentials.getAccessKey(), "access_key");
+    assertEquals(s3Credentials.getSecretAccessKey(), "+MyVerysecret/K3y");
+  }
+
 }
