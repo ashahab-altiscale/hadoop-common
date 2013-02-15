@@ -40,8 +40,13 @@ public class TestS3Credentials extends TestCase {
   @Test
   public void testUserInfo() throws Exception {
     S3Credentials s3Credentials = new S3Credentials();
-    s3Credentials.initialize(new URI("s3://access_key:+MyVerysecret%2FK3y@s3.hostname.com"), new Configuration());
-    assertEquals(s3Credentials.getAccessKey(), "access_key");
+    // The URI needs to be carefully constructed to cause the initialize code
+    // to fail with an undecoded %2F in the same way that it fails when trying
+    // to use the code with hadoop fs, distcp, or other user-level tools.
+    s3Credentials.initialize(new URI("s3", "my_access_key:+MyVerysecret%2FK3y@s3.hostname.com", 
+				     null, null, null),
+			     new Configuration());
+    assertEquals(s3Credentials.getAccessKey(), "my_access_key");
     assertEquals(s3Credentials.getSecretAccessKey(), "+MyVerysecret/K3y");
   }
 
