@@ -26,7 +26,7 @@ import org.apache.hadoop.conf.Configuration;
 
 public class TestS3Credentials extends TestCase {
 
-  @Test
+  @Test(timeout=10000)
   public void testInvalidHostnameWithUnderscores() throws Exception {
     S3Credentials s3Credentials = new S3Credentials();
     try {
@@ -37,7 +37,7 @@ public class TestS3Credentials extends TestCase {
     }
   }
 
-  @Test
+  @Test(timeout=10000)
   public void testUserInfo() throws Exception {
     S3Credentials s3Credentials = new S3Credentials();
     // The URI needs to be carefully constructed to cause the initialize code
