@@ -165,9 +165,7 @@ class NameNodeConnector {
    */
   private OutputStream checkAndMarkRunningBalancer() throws IOException {
     try {
-      // A balancer will not be able to create the file while another one is
-      // running.
-      final DataOutputStream out = fs.create(BALANCER_ID_PATH, false);
+      final DataOutputStream out = fs.create(BALANCER_ID_PATH);
       out.writeBytes(InetAddress.getLocalHost().getHostName());
       out.flush();
       return out;

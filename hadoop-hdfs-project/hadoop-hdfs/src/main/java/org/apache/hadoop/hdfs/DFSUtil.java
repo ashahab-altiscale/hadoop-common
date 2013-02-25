@@ -34,7 +34,6 @@ import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_NAMESERVICE_ID;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -366,54 +365,6 @@ public class DFSUtil {
    */
   public static Collection<String> getNameServiceIds(Configuration conf) {
     return conf.getTrimmedStringCollection(DFS_NAMESERVICES);
-  }
-
-  /**
-   * Method to convert host addresses of a set of URIs to IP addresses and
-   * returns the unique ones.
-   *
-   * @param uris a collection of all configured URIs
-   * @return a collection of unique URIs with their host addresses in IP form.
-   */
-  public static Set<URI> ipizeAndRemoveDuplicates(Set<URI> uris) {
-    Set<URI> ret = new HashSet<URI>();
-
-    // For each URI, we convert the host to IP address, standardize them and
-    // finally compare them to pick out the unique ones.
-    for (URI uri : uris) {
-      // Get the scheme, host address and port number of each URI.
-      String scheme = uri.getScheme();
-      Integer port = uri.getPort();
-
-      // Resolve hostname into IP address.
-      String address = "";
-      try {
-        address = InetAddress.getByName(uri.getHost()).getHostAddress();
-      } catch (Exception e) {
-        // If we fail to resolve the hostname into IP, we fall back to
-        // use the hostname.
-        address = uri.getHost();
-      }
-
-      // Concatenate the parsed URI into a new one before re-inserting
-      // it into the final set.
-      String fullAddrStr = "";
-      if (scheme != null && !scheme.equals(""))
-        fullAddrStr += scheme + "://";
-      fullAddrStr += address;
-      if (port != -1) fullAddrStr += ":" + port;
-
-      // Add the parsed full address into the final set.
-      try {
-        ret.add(new URI(fullAddrStr));
-      } catch (URISyntaxException ue) {
-        // Should not reach here as the input should be well-configured
-        // URIs.
-        throw new IllegalArgumentException(ue);
-       }
-    }
-
-    return ret;
   }
 
   /**
@@ -826,7 +777,7 @@ public class DFSUtil {
       ret.add(defaultUri);
     }
     
-    return ipizeAndRemoveDuplicates(ret);
+    return ret;
   }
 
   /**
