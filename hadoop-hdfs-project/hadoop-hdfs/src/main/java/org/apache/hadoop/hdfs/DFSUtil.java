@@ -460,7 +460,7 @@ public class DFSUtil {
     
     // Look for configurations of the form <key>[.<nameserviceId>][.<namenodeId>]
     // across all of the configured nameservices and namenodes.
-    Map<String, Map<String, InetSocketAddress>> ret = Maps.newHashMap();
+    Map<String, Map<String, InetSocketAddress>> ret = Maps.newLinkedHashMap();
     for (String nsId : emptyAsSingletonNull(nameserviceIds)) {
       Map<String, InetSocketAddress> isas =
         getAddressesForNameserviceId(conf, nsId, defaultAddress, keys);
@@ -1258,5 +1258,21 @@ public class DFSUtil {
         " = '" + blocksReplWorkMultiplier + "' is invalid. " +
         "It should be a positive, non-zero integer value.");
     return blocksReplWorkMultiplier;
+  }
+  
+  /**
+   * Get SPNEGO keytab Key from configuration
+   * 
+   * @param conf
+   *          Configuration
+   * @param defaultKey
+   * @return DFS_WEB_AUTHENTICATION_KERBEROS_KEYTAB_KEY if the key is not empty
+   *         else return defaultKey
+   */
+  public static String getSpnegoKeytabKey(Configuration conf, String defaultKey) {
+    String value = 
+        conf.get(DFSConfigKeys.DFS_WEB_AUTHENTICATION_KERBEROS_KEYTAB_KEY);
+    return (value == null || value.isEmpty()) ?
+        defaultKey : DFSConfigKeys.DFS_WEB_AUTHENTICATION_KERBEROS_KEYTAB_KEY;
   }
 }

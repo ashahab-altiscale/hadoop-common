@@ -83,7 +83,8 @@ public class TestRMWebServicesApps extends JerseyTest {
       bind(RMWebServices.class);
       bind(GenericExceptionHandler.class);
       Configuration conf = new Configuration();
-      conf.setInt(YarnConfiguration.RM_AM_MAX_RETRIES, 2);
+      conf.setInt(YarnConfiguration.RM_AM_MAX_ATTEMPTS,
+          YarnConfiguration.DEFAULT_RM_AM_MAX_ATTEMPTS);
       conf.setClass(YarnConfiguration.RM_SCHEDULER, FifoScheduler.class,
           ResourceScheduler.class);
       rm = new MockRM(conf);
@@ -871,9 +872,11 @@ public class TestRMWebServicesApps extends JerseyTest {
     MockNM amNodeManager = rm.registerNode("amNM:1234", 2048);
     RMApp app1 = rm.submitApp(1024, "testwordcount", "user1");
     amNodeManager.nodeHeartbeat(true);
-    int maxRetries = rm.getConfig().getInt(YarnConfiguration.RM_AM_MAX_RETRIES,
-        YarnConfiguration.DEFAULT_RM_AM_MAX_RETRIES);
-    int retriesLeft = maxRetries;
+    int maxAppAttempts = rm.getConfig().getInt(
+        YarnConfiguration.RM_AM_MAX_ATTEMPTS,
+        YarnConfiguration.DEFAULT_RM_AM_MAX_ATTEMPTS);
+    assertTrue(maxAppAttempts > 1);
+    int retriesLeft = maxAppAttempts;
     while (--retriesLeft > 0) {
       RMAppEvent event =
           new RMAppFailedAttemptEvent(app1.getApplicationId(),
@@ -882,7 +885,7 @@ public class TestRMWebServicesApps extends JerseyTest {
       rm.waitForState(app1.getApplicationId(), RMAppState.ACCEPTED);
       amNodeManager.nodeHeartbeat(true);
     }
-    assertEquals("incorrect number of attempts", maxRetries,
+    assertEquals("incorrect number of attempts", maxAppAttempts,
         app1.getAppAttempts().values().size());
     testAppAttemptsHelper(app1.getApplicationId().toString(), app1,
         MediaType.APPLICATION_JSON);
@@ -1079,8 +1082,9 @@ public class TestRMWebServicesApps extends JerseyTest {
         .getMasterContainer().getNodeId().toString(), nodeId);
     assertTrue("logsLink doesn't match",
         logsLink.startsWith("http://"));
-    assertTrue("logsLink doesn't contain user info",
-        logsLink.endsWith("/" + appAttempt.getSubmissionContext().getUser()));
+    assertTrue(
+        "logsLink doesn't contain user info", logsLink.endsWith("/"
+        + appAttempt.getSubmissionContext().getAMContainerSpec().getUser()));
   }
 
 }

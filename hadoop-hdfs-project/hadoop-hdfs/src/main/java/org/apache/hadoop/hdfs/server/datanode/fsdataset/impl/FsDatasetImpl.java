@@ -41,6 +41,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.DFSUtil;
 import org.apache.hadoop.hdfs.protocol.Block;
@@ -75,6 +76,7 @@ import org.apache.hadoop.hdfs.server.datanode.fsdataset.VolumeChoosingPolicy;
 import org.apache.hadoop.hdfs.server.datanode.metrics.FSDatasetMBean;
 import org.apache.hadoop.hdfs.server.protocol.BlockRecoveryCommand.RecoveringBlock;
 import org.apache.hadoop.hdfs.server.protocol.ReplicaRecoveryInfo;
+import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.io.nativeio.NativeIO;
 import org.apache.hadoop.metrics2.util.MBeans;
 import org.apache.hadoop.util.DataChecksum;
@@ -91,6 +93,15 @@ import org.apache.hadoop.util.Time;
 @InterfaceAudience.Private
 class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
   static final Log LOG = LogFactory.getLog(FsDatasetImpl.class);
+  private final static boolean isNativeIOAvailable;
+  static {
+    isNativeIOAvailable = NativeIO.isAvailable();
+    if (Path.WINDOWS && !isNativeIOAvailable) {
+      LOG.warn("Data node cannot fully support concurrent reading"
+          + " and writing without native code extensions on Windows.");
+    }
+  }
+
 
   @Override // FsDatasetSpi
   public List<FsVolumeImpl> getVolumes() {
@@ -147,6 +158,11 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
     File meta = FsDatasetUtil.getMetaFile(getBlockFile(b), b.getGenerationStamp());
     if (meta == null || !meta.exists()) {
       return null;
+    }
+    if (isNativeIOAvailable) {
+      return new LengthInputStream(
+          NativeIO.getShareDeleteFileInputStream(meta),
+          meta.length());
     }
     return new LengthInputStream(new FileInputStream(meta), meta.length());
   }
@@ -323,18 +339,22 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
   public InputStream getBlockInputStream(ExtendedBlock b,
       long seekOffset) throws IOException {
     File blockFile = getBlockFileNoExistsCheck(b);
-    RandomAccessFile blockInFile;
-    try {
-      blockInFile = new RandomAccessFile(blockFile, "r");
-    } catch (FileNotFoundException fnfe) {
-      throw new IOException("Block " + b + " is not valid. " +
-          "Expected block file at " + blockFile + " does not exist.");
-    }
+    if (isNativeIOAvailable) {
+      return NativeIO.getShareDeleteFileInputStream(blockFile, seekOffset);
+    } else {
+      RandomAccessFile blockInFile;
+      try {
+        blockInFile = new RandomAccessFile(blockFile, "r");
+      } catch (FileNotFoundException fnfe) {
+        throw new IOException("Block " + b + " is not valid. " +
+            "Expected block file at " + blockFile + " does not exist.");
+      }
 
-    if (seekOffset > 0) {
-      blockInFile.seek(seekOffset);
+      if (seekOffset > 0) {
+        blockInFile.seek(seekOffset);
+      }
+      return new FileInputStream(blockInFile.getFD());
     }
-    return new FileInputStream(blockInFile.getFD());
   }
 
   /**
@@ -1681,6 +1701,26 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
     return info;
   }
   
+  @Override // FsDatasetSpi
+  public FileInputStream[] getShortCircuitFdsForRead(ExtendedBlock block) 
+      throws IOException {
+    File datafile = getBlockFile(block);
+    File metafile = FsDatasetUtil.getMetaFile(datafile,
+        block.getGenerationStamp());
+    FileInputStream fis[] = new FileInputStream[2];
+    boolean success = false;
+    try {
+      fis[0] = new FileInputStream(datafile);
+      fis[1] = new FileInputStream(metafile);
+      success = true;
+      return fis;
+    } finally {
+      if (!success) {
+        IOUtils.cleanup(null, fis);
+      }
+    }
+  }
+    
   @Override // FsDatasetSpi
   public HdfsBlocksMetadata getHdfsBlocksMetadata(List<ExtendedBlock> blocks)
       throws IOException {

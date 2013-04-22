@@ -34,6 +34,7 @@ import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_ENCRYPT_DATA_TRANSFER_KEY
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_HA_STANDBY_CHECKPOINTS_DEFAULT;
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_HA_STANDBY_CHECKPOINTS_KEY;
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_NAMENODE_ACCESSTIME_PRECISION_KEY;
+import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_NAMENODE_ACCESSTIME_PRECISION_DEFAULT;
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_NAMENODE_AUDIT_LOGGERS_KEY;
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_NAMENODE_DEFAULT_AUDIT_LOGGER_NAME;
 import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_NAMENODE_DELEGATION_KEY_UPDATE_INTERVAL_DEFAULT;
@@ -255,10 +256,23 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     return !isDefaultAuditLogger || auditLog.isInfoEnabled();
   }
 
-  private void logAuditEvent(UserGroupInformation ugi,
-      InetAddress addr, String cmd, String src, String dst,
-      HdfsFileStatus stat) {
-    logAuditEvent(true, ugi, addr, cmd, src, dst, stat);
+  private HdfsFileStatus getAuditFileInfo(String path, boolean resolveSymlink)
+      throws IOException {
+    return (isAuditEnabled() && isExternalInvocation())
+        ? dir.getFileInfo(path, resolveSymlink) : null;
+  }
+  
+  private void logAuditEvent(boolean succeeded, String cmd, String src)
+      throws IOException {
+    logAuditEvent(succeeded, cmd, src, null, null);
+  }
+  
+  private void logAuditEvent(boolean succeeded, String cmd, String src,
+      String dst, HdfsFileStatus stat) throws IOException {
+    if (isAuditEnabled() && isExternalInvocation()) {
+      logAuditEvent(succeeded, getRemoteUser(), getRemoteIp(),
+                    cmd, src, dst, stat);
+    }
   }
 
   private void logAuditEvent(boolean succeeded,
@@ -581,7 +595,8 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       this.maxFsObjects = conf.getLong(DFS_NAMENODE_MAX_OBJECTS_KEY, 
                                        DFS_NAMENODE_MAX_OBJECTS_DEFAULT);
 
-      this.accessTimePrecision = conf.getLong(DFS_NAMENODE_ACCESSTIME_PRECISION_KEY, 0);
+      this.accessTimePrecision = conf.getLong(DFS_NAMENODE_ACCESSTIME_PRECISION_KEY,
+          DFS_NAMENODE_ACCESSTIME_PRECISION_DEFAULT);
       this.supportAppends = conf.getBoolean(DFS_SUPPORT_APPEND_KEY, DFS_SUPPORT_APPEND_DEFAULT);
       LOG.info("Append Enabled: " + supportAppends);
 
@@ -887,7 +902,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     }
   }
   
-  
+  @Override
   public void checkOperation(OperationCategory op) throws StandbyException {
     if (haContext != null) {
       // null in some unit tests
@@ -1114,8 +1129,10 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    */
   void metaSave(String filename) throws IOException {
     checkSuperuserPrivilege();
+    checkOperation(OperationCategory.UNCHECKED);
     writeLock();
     try {
+      checkOperation(OperationCategory.UNCHECKED);
       File file = new File(System.getProperty("hadoop.log.dir"), filename);
       PrintWriter out = new PrintWriter(new BufferedWriter(
           new OutputStreamWriter(new FileOutputStream(file, true), Charsets.UTF_8)));
@@ -1179,11 +1196,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     try {
       setPermissionInt(src, permission);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "setPermission", src, null, null);
-      }
+      logAuditEvent(false, "setPermission", src);
       throw e;
     }
   }
@@ -1193,27 +1206,23 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       UnresolvedLinkException, IOException {
     HdfsFileStatus resultingStat = null;
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-
       if (isInSafeMode()) {
         throw new SafeModeException("Cannot set permission for " + src, safeMode);
       }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       checkOwner(pc, src);
       dir.setPermission(src, permission);
-      if (isAuditEnabled() && isExternalInvocation()) {
-        resultingStat = dir.getFileInfo(src, false);
-      }
+      resultingStat = getAuditFileInfo(src, false);
     } finally {
       writeUnlock();
     }
     getEditLog().logSync();
-    if (isAuditEnabled() && isExternalInvocation()) {
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
-                    getRemoteIp(),
-                    "setPermission", src, null, resultingStat);
-    }
+    logAuditEvent(true, "setPermission", src, null, resultingStat);
   }
 
   /**
@@ -1226,11 +1235,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     try {
       setOwnerInt(src, username, group);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "setOwner", src, null, null);
-      }
+      logAuditEvent(false, "setOwner", src);
       throw e;
     } 
   }
@@ -1240,13 +1245,15 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       UnresolvedLinkException, IOException {
     HdfsFileStatus resultingStat = null;
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-
       if (isInSafeMode()) {
         throw new SafeModeException("Cannot set owner for " + src, safeMode);
       }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       checkOwner(pc, src);
       if (!pc.isSuperUser()) {
         if (username != null && !pc.getUser().equals(username)) {
@@ -1257,18 +1264,12 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
         }
       }
       dir.setOwner(src, username, group);
-      if (isAuditEnabled() && isExternalInvocation()) {
-        resultingStat = dir.getFileInfo(src, false);
-      }
+      resultingStat = getAuditFileInfo(src, false);
     } finally {
       writeUnlock();
     }
     getEditLog().logSync();
-    if (isAuditEnabled() && isExternalInvocation()) {
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
-                    getRemoteIp(),
-                    "setOwner", src, null, resultingStat);
-    }
+    logAuditEvent(true, "setOwner", src, null, resultingStat);
   }
 
   /**
@@ -1303,28 +1304,19 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   LocatedBlocks getBlockLocations(String src, long offset, long length,
       boolean doAccessTime, boolean needBlockToken, boolean checkSafeMode)
       throws FileNotFoundException, UnresolvedLinkException, IOException {
-    FSPermissionChecker pc = getPermissionChecker();
     try {
-      return getBlockLocationsInt(pc, src, offset, length, doAccessTime,
+      return getBlockLocationsInt(src, offset, length, doAccessTime,
                                   needBlockToken, checkSafeMode);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "open", src, null, null);
-      }
+      logAuditEvent(false, "open", src);
       throw e;
     }
   }
 
-  private LocatedBlocks getBlockLocationsInt(FSPermissionChecker pc,
-      String src, long offset, long length, boolean doAccessTime,
-      boolean needBlockToken, boolean checkSafeMode)
+  private LocatedBlocks getBlockLocationsInt(String src, long offset,
+      long length, boolean doAccessTime, boolean needBlockToken,
+      boolean checkSafeMode)
       throws FileNotFoundException, UnresolvedLinkException, IOException {
-    if (isPermissionEnabled) {
-      checkPathAccess(pc, src, FsAction.READ);
-    }
-
     if (offset < 0) {
       throw new HadoopIllegalArgumentException(
           "Negative offset is not supported. File: " + src);
@@ -1335,11 +1327,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     }
     final LocatedBlocks ret = getBlockLocationsUpdateTimes(src,
         offset, length, doAccessTime, needBlockToken);  
-    if (isAuditEnabled() && isExternalInvocation()) {
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
-                    getRemoteIp(),
-                    "open", src, null, null);
-    }
+    logAuditEvent(true, "open", src);
     if (checkSafeMode && isInSafeMode()) {
       for (LocatedBlock b : ret.getLocatedBlocks()) {
         // if safemode & no block locations yet then throw safemodeException
@@ -1356,21 +1344,31 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    * Get block locations within the specified range, updating the
    * access times if necessary. 
    */
-  private LocatedBlocks getBlockLocationsUpdateTimes(String src,
-                                                       long offset, 
-                                                       long length,
-                                                       boolean doAccessTime, 
-                                                       boolean needBlockToken)
-      throws FileNotFoundException, UnresolvedLinkException, IOException {
-
+  private LocatedBlocks getBlockLocationsUpdateTimes(String src, long offset,
+      long length, boolean doAccessTime, boolean needBlockToken)
+      throws FileNotFoundException,
+      UnresolvedLinkException, IOException {
+    FSPermissionChecker pc = getPermissionChecker();
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     for (int attempt = 0; attempt < 2; attempt++) {
-      if (attempt == 0) { // first attempt is with readlock
+      boolean isReadOp = (attempt == 0);
+      if (isReadOp) { // first attempt is with readlock
+        checkOperation(OperationCategory.READ);
         readLock();
       }  else { // second attempt is with  write lock
+        checkOperation(OperationCategory.WRITE);
         writeLock(); // writelock is needed to set accesstime
       }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       try {
-        checkOperation(OperationCategory.READ);
+        if (isReadOp) {
+          checkOperation(OperationCategory.READ);
+        } else {
+          checkOperation(OperationCategory.WRITE);
+        }
+        if (isPermissionEnabled) {
+          checkPathAccess(pc, src, FsAction.READ);
+        }
 
         // if the namenode is in safemode, then do not update access time
         if (isInSafeMode()) {
@@ -1380,20 +1378,20 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
         long now = now();
         final INodeFile inode = INodeFile.valueOf(dir.getINode(src), src);
         if (doAccessTime && isAccessTimeSupported()) {
-          if (now <= inode.getAccessTime() + getAccessTimePrecision()) {
+          if (now > inode.getAccessTime() + getAccessTimePrecision()) {
             // if we have to set access time but we only have the readlock, then
             // restart this entire operation with the writeLock.
-            if (attempt == 0) {
+            if (isReadOp) {
               continue;
             }
+            dir.setTimes(src, inode, -1, now, false);
           }
-          dir.setTimes(src, inode, -1, now, false);
         }
         return blockManager.createLocatedBlocks(inode.getBlocks(),
             inode.computeFileSize(false), inode.isUnderConstruction(),
             offset, length, needBlockToken);
       } finally {
-        if (attempt == 0) {
+        if (isReadOp) {
           readUnlock();
         } else {
           writeUnlock();
@@ -1407,31 +1405,28 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    * Moves all the blocks from srcs and appends them to trg
    * To avoid rollbacks we will verify validitity of ALL of the args
    * before we start actual move.
+   * 
+   * This does not support ".inodes" relative path
    * @param target
    * @param srcs
    * @throws IOException
    */
   void concat(String target, String [] srcs) 
       throws IOException, UnresolvedLinkException {
+    if(FSNamesystem.LOG.isDebugEnabled()) {
+      FSNamesystem.LOG.debug("concat " + Arrays.toString(srcs) +
+          " to " + target);
+    }
     try {
       concatInt(target, srcs);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getLoginUser(),
-                      getRemoteIp(),
-                      "concat", Arrays.toString(srcs), target, null);
-      }
+      logAuditEvent(false, "concat", Arrays.toString(srcs), target, null);
       throw e;
     }
   }
 
   private void concatInt(String target, String [] srcs) 
       throws IOException, UnresolvedLinkException {
-    if(FSNamesystem.LOG.isDebugEnabled()) {
-      FSNamesystem.LOG.debug("concat " + Arrays.toString(srcs) +
-          " to " + target);
-    }
-    
     // verify args
     if(target.isEmpty()) {
       throw new IllegalArgumentException("Target file name is empty");
@@ -1453,6 +1448,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
 
     HdfsFileStatus resultingStat = null;
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
@@ -1460,18 +1456,12 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
         throw new SafeModeException("Cannot concat " + target, safeMode);
       }
       concatInternal(pc, target, srcs);
-      if (isAuditEnabled() && isExternalInvocation()) {
-        resultingStat = dir.getFileInfo(target, false);
-      }
+      resultingStat = getAuditFileInfo(target, false);
     } finally {
       writeUnlock();
     }
     getEditLog().logSync();
-    if (isAuditEnabled() && isExternalInvocation()) {
-      logAuditEvent(UserGroupInformation.getLoginUser(),
-                    getRemoteIp(),
-                    "concat", Arrays.toString(srcs), target, resultingStat);
-    }
+    logAuditEvent(true, "concat", Arrays.toString(srcs), target, resultingStat);
   }
 
   /** See {@link #concat(String, String[])} */
@@ -1585,28 +1575,31 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    */
   void setTimes(String src, long mtime, long atime) 
       throws IOException, UnresolvedLinkException {
+    if (!isAccessTimeSupported() && atime != -1) {
+      throw new IOException("Access time for hdfs is not configured. " +
+                            " Please set " + DFS_NAMENODE_ACCESSTIME_PRECISION_KEY + " configuration parameter.");
+    }
     try {
       setTimesInt(src, mtime, atime);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "setTimes", src, null, null);
-      }
+      logAuditEvent(false, "setTimes", src);
       throw e;
     }
   }
 
   private void setTimesInt(String src, long mtime, long atime) 
     throws IOException, UnresolvedLinkException {
-    if (!isAccessTimeSupported() && atime != -1) {
-      throw new IOException("Access time for hdfs is not configured. " +
-                            " Please set " + DFS_NAMENODE_ACCESSTIME_PRECISION_KEY + " configuration parameter.");
-    }
+    HdfsFileStatus resultingStat = null;
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
+      if (isInSafeMode()) {
+        throw new SafeModeException("Cannot set times " + src, safeMode);
+      }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
 
       // Write access is required to set access and modification times
       if (isPermissionEnabled) {
@@ -1615,18 +1608,14 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       INode inode = dir.getINode(src);
       if (inode != null) {
         dir.setTimes(src, inode, mtime, atime, true);
-        if (isAuditEnabled() && isExternalInvocation()) {
-          final HdfsFileStatus stat = dir.getFileInfo(src, false);
-          logAuditEvent(UserGroupInformation.getCurrentUser(),
-                        getRemoteIp(),
-                        "setTimes", src, null, stat);
-        }
+        resultingStat = getAuditFileInfo(src, false);
       } else {
         throw new FileNotFoundException("File/Directory " + src + " does not exist.");
       }
     } finally {
       writeUnlock();
     }
+    logAuditEvent(true, "setTimes", src, null, resultingStat);
   }
 
   /**
@@ -1635,14 +1624,16 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   void createSymlink(String target, String link,
       PermissionStatus dirPerms, boolean createParent) 
       throws IOException, UnresolvedLinkException {
+    if (!DFSUtil.isValidName(link)) {
+      throw new InvalidPathException("Invalid link name: " + link);
+    }
+    if (FSDirectory.isReservedName(target)) {
+      throw new InvalidPathException("Invalid target name: " + target);
+    }
     try {
       createSymlinkInt(target, link, dirPerms, createParent);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "createSymlink", link, target, null);
-      }
+      logAuditEvent(false, "createSymlink", link, target, null);
       throw e;
     }
   }
@@ -1650,59 +1641,42 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   private void createSymlinkInt(String target, String link,
       PermissionStatus dirPerms, boolean createParent) 
       throws IOException, UnresolvedLinkException {
+    if (NameNode.stateChangeLog.isDebugEnabled()) {
+      NameNode.stateChangeLog.debug("DIR* NameSystem.createSymlink: target="
+          + target + " link=" + link);
+    }
     HdfsFileStatus resultingStat = null;
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(link);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-
+      if (isInSafeMode()) {
+        throw new SafeModeException("Cannot create symlink " + link, safeMode);
+      }
+      link = FSDirectory.resolvePath(link, pathComponents, dir);
       if (!createParent) {
         verifyParentDir(link);
       }
-      createSymlinkInternal(pc, target, link, dirPerms, createParent);
-      if (isAuditEnabled() && isExternalInvocation()) {
-        resultingStat = dir.getFileInfo(link, false);
+      if (!dir.isValidToCreate(link)) {
+        throw new IOException("failed to create link " + link 
+            +" either because the filename is invalid or the file exists");
       }
+      if (isPermissionEnabled) {
+        checkAncestorAccess(pc, link, FsAction.WRITE);
+      }
+      // validate that we have enough inodes.
+      checkFsObjectLimit();
+
+      // add symbolic link to namespace
+      dir.addSymlink(link, target, dirPerms, createParent);
+      resultingStat = getAuditFileInfo(link, false);
     } finally {
       writeUnlock();
     }
     getEditLog().logSync();
-    if (isAuditEnabled() && isExternalInvocation()) {
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
-                    getRemoteIp(),
-                    "createSymlink", link, target, resultingStat);
-    }
-  }
-
-  /**
-   * Create a symbolic link.
-   */
-  private void createSymlinkInternal(FSPermissionChecker pc, String target,
-      String link, PermissionStatus dirPerms, boolean createParent)
-      throws IOException, UnresolvedLinkException {
-    assert hasWriteLock();
-    if (NameNode.stateChangeLog.isDebugEnabled()) {
-      NameNode.stateChangeLog.debug("DIR* NameSystem.createSymlink: target=" + 
-        target + " link=" + link);
-    }
-    if (isInSafeMode()) {
-      throw new SafeModeException("Cannot create symlink " + link, safeMode);
-    }
-    if (!DFSUtil.isValidName(link)) {
-      throw new InvalidPathException("Invalid file name: " + link);
-    }
-    if (!dir.isValidToCreate(link)) {
-      throw new IOException("failed to create link " + link 
-          +" either because the filename is invalid or the file exists");
-    }
-    if (isPermissionEnabled) {
-      checkAncestorAccess(pc, link, FsAction.WRITE);
-    }
-    // validate that we have enough inodes.
-    checkFsObjectLimit();
-
-    // add symbolic link to namespace
-    dir.addSymlink(link, target, dirPerms, createParent);
+    logAuditEvent(true, "createSymlink", link, target, resultingStat);
   }
 
   /**
@@ -1723,26 +1697,25 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     try {
       return setReplicationInt(src, replication);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "setReplication", src, null, null);
-      }
+      logAuditEvent(false, "setReplication", src);
       throw e;
     }
   }
 
-  private boolean setReplicationInt(final String src, final short replication)
+  private boolean setReplicationInt(String src, final short replication)
       throws IOException {
     blockManager.verifyReplication(src, replication, null);
     final boolean isFile;
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
       if (isInSafeMode()) {
         throw new SafeModeException("Cannot set replication for " + src, safeMode);
       }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       if (isPermissionEnabled) {
         checkPathAccess(pc, src, FsAction.WRITE);
       }
@@ -1758,10 +1731,8 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     }
 
     getEditLog().logSync();
-    if (isFile && isAuditEnabled() && isExternalInvocation()) {
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
-                    getRemoteIp(),
-                    "setReplication", src, null, null);
+    if (isFile) {
+      logAuditEvent(true, "setReplication", src);
     }
     return isFile;
   }
@@ -1769,9 +1740,12 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   long getPreferredBlockSize(String filename) 
       throws IOException, UnresolvedLinkException {
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.READ);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(filename);
     readLock();
     try {
       checkOperation(OperationCategory.READ);
+      filename = FSDirectory.resolvePath(filename, pathComponents, dir);
       if (isPermissionEnabled) {
         checkTraverse(pc, filename);
       }
@@ -1817,11 +1791,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       return startFileInt(src, permissions, holder, clientMachine, flag,
           createParent, replication, blockSize);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "create", src, null, null);
-      }
+      logAuditEvent(false, "create", src);
       throw e;
     }
   }
@@ -1832,12 +1802,30 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       throws AccessControlException, SafeModeException,
       FileAlreadyExistsException, UnresolvedLinkException,
       FileNotFoundException, ParentNotDirectoryException, IOException {
+    if (NameNode.stateChangeLog.isDebugEnabled()) {
+      NameNode.stateChangeLog.debug("DIR* NameSystem.startFile: src=" + src
+          + ", holder=" + holder
+          + ", clientMachine=" + clientMachine
+          + ", createParent=" + createParent
+          + ", replication=" + replication
+          + ", createFlag=" + flag.toString());
+    }
+    if (!DFSUtil.isValidName(src)) {
+      throw new InvalidPathException(src);
+    }
+
     boolean skipSync = false;
     final HdfsFileStatus stat;
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
+      if (isInSafeMode()) {
+        throw new SafeModeException("Cannot create file" + src, safeMode);
+      }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       startFileInternal(pc, src, permissions, holder, clientMachine, flag,
           createParent, replication, blockSize);
       stat = dir.getFileInfo(src, false);
@@ -1853,11 +1841,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       }
     } 
 
-    if (isAuditEnabled() && isExternalInvocation()) {
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
-                    getRemoteIp(),
-                    "create", src, null, stat);
-    }
+    logAuditEvent(true, "create", src, null, stat);
     return stat;
   }
 
@@ -1884,21 +1868,6 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       AccessControlException, UnresolvedLinkException, FileNotFoundException,
       ParentNotDirectoryException, IOException {
     assert hasWriteLock();
-    if (NameNode.stateChangeLog.isDebugEnabled()) {
-      NameNode.stateChangeLog.debug("DIR* NameSystem.startFile: src=" + src
-          + ", holder=" + holder
-          + ", clientMachine=" + clientMachine
-          + ", createParent=" + createParent
-          + ", replication=" + replication
-          + ", createFlag=" + flag.toString());
-    }
-    if (isInSafeMode()) {
-      throw new SafeModeException("Cannot create file" + src, safeMode);
-    }
-    if (!DFSUtil.isValidName(src)) {
-      throw new InvalidPathException(src);
-    }
-
     // Verify that the destination does not exist as a directory already.
     boolean pathExists = dir.exists(src);
     if (pathExists && dir.isDir(src)) {
@@ -1959,9 +1928,8 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
        checkFsObjectLimit();
 
         // increment global generation stamp
-        long genstamp = nextGenerationStamp();
         INodeFileUnderConstruction newNode = dir.addFile(src, permissions,
-            replication, blockSize, holder, clientMachine, clientNode, genstamp);
+            replication, blockSize, holder, clientMachine, clientNode);
         if (newNode == null) {
           throw new IOException("DIR* NameSystem.startFile: " +
                                 "Unable to add file to namespace.");
@@ -2034,20 +2002,22 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    */
   boolean recoverLease(String src, String holder, String clientMachine)
       throws IOException {
+    if (!DFSUtil.isValidName(src)) {
+      throw new IOException("Invalid file name: " + src);
+    }
+  
     boolean skipSync = false;
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-
       if (isInSafeMode()) {
         throw new SafeModeException(
             "Cannot recover the lease of " + src, safeMode);
       }
-      if (!DFSUtil.isValidName(src)) {
-        throw new IOException("Invalid file name: " + src);
-      }
-  
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       final INodeFile inode = INodeFile.valueOf(dir.getINode(src), src);
       if (!inode.isUnderConstruction()) {
         return true;
@@ -2156,11 +2126,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     try {
       return appendFileInt(src, holder, clientMachine);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "append", src, null, null);
-      }
+      logAuditEvent(false, "append", src);
       throw e;
     }
   }
@@ -2169,18 +2135,37 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       throws AccessControlException, SafeModeException,
       FileAlreadyExistsException, FileNotFoundException,
       ParentNotDirectoryException, IOException {
+    if (NameNode.stateChangeLog.isDebugEnabled()) {
+      NameNode.stateChangeLog.debug("DIR* NameSystem.appendFile: src=" + src
+          + ", holder=" + holder
+          + ", clientMachine=" + clientMachine);
+    }
     boolean skipSync = false;
     if (!supportAppends) {
       throw new UnsupportedOperationException(
           "Append is not enabled on this NameNode. Use the " +
           DFS_SUPPORT_APPEND_KEY + " configuration option to enable it.");
     }
+    if (NameNode.stateChangeLog.isDebugEnabled()) {
+      NameNode.stateChangeLog.debug("DIR* NameSystem.appendFile: src=" + src
+          + ", holder=" + holder
+          + ", clientMachine=" + clientMachine);
+    }
+    if (!DFSUtil.isValidName(src)) {
+      throw new InvalidPathException(src);
+    }
+
     LocatedBlock lb = null;
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-
+      if (isInSafeMode()) {
+        throw new SafeModeException("Cannot append to file" + src, safeMode);
+      }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       lb = startFileInternal(pc, src, null, holder, clientMachine, 
                         EnumSet.of(CreateFlag.APPEND), 
                         false, blockManager.maxReplication, 0);
@@ -2203,11 +2188,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
             +" block size " + lb.getBlock().getNumBytes());
       }
     }
-    if (isAuditEnabled() && isExternalInvocation()) {
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
-                    getRemoteIp(),
-                    "append", src, null, null);
-    }
+    logAuditEvent(true, "append", src);
     return lb;
   }
 
@@ -2247,8 +2228,12 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     }
 
     // Part I. Analyze the state of the file with respect to the input data.
+    checkOperation(OperationCategory.READ);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     readLock();
     try {
+      checkOperation(OperationCategory.READ);
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       LocatedBlock[] onRetryBlock = new LocatedBlock[1];
       final INode[] inodes = analyzeFileState(
           src, fileId, clientName, previous, onRetryBlock).getINodes();
@@ -2275,8 +2260,10 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     // Allocate a new block, add it to the INode and the BlocksMap. 
     Block newBlock = null;
     long offset;
+    checkOperation(OperationCategory.WRITE);
     writeLock();
     try {
+      checkOperation(OperationCategory.WRITE);
       // Run the full analysis again, since things could have changed
       // while chooseTarget() was executing.
       LocatedBlock[] onRetryBlock = new LocatedBlock[1];
@@ -2420,7 +2407,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   }
 
   /** @see NameNode#getAdditionalDatanode(String, ExtendedBlock, DatanodeInfo[], DatanodeInfo[], int, String) */
-  LocatedBlock getAdditionalDatanode(final String src, final ExtendedBlock blk,
+  LocatedBlock getAdditionalDatanode(String src, final ExtendedBlock blk,
       final DatanodeInfo[] existings,  final HashMap<Node, Node> excludes,
       final int numAdditionalNodes, final String clientName
       ) throws IOException {
@@ -2430,14 +2417,17 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     final DatanodeDescriptor clientnode;
     final long preferredblocksize;
     final List<DatanodeDescriptor> chosen;
+    checkOperation(OperationCategory.READ);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     readLock();
     try {
-      checkOperation(OperationCategory.WRITE);
+      checkOperation(OperationCategory.READ);
       //check safe mode
       if (isInSafeMode()) {
         throw new SafeModeException("Cannot add datanode; src=" + src
             + ", blk=" + blk, safeMode);
       }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
 
       //check lease
       final INodeFileUnderConstruction file = checkLease(src, clientName);
@@ -2472,20 +2462,24 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   boolean abandonBlock(ExtendedBlock b, String src, String holder)
       throws LeaseExpiredException, FileNotFoundException,
       UnresolvedLinkException, IOException {
+    if(NameNode.stateChangeLog.isDebugEnabled()) {
+      NameNode.stateChangeLog.debug("BLOCK* NameSystem.abandonBlock: " + b
+          + "of file " + src);
+    }
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-      //
-      // Remove the block from the pending creates list
-      //
-      if(NameNode.stateChangeLog.isDebugEnabled()) {
-        NameNode.stateChangeLog.debug("BLOCK* NameSystem.abandonBlock: "
-                                      +b+"of file "+src);
-      }
       if (isInSafeMode()) {
         throw new SafeModeException("Cannot abandon block " + b +
                                     " for fle" + src, safeMode);
       }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
+
+      //
+      // Remove the block from the pending creates list
+      //
       INodeFileUnderConstruction file = checkLease(src, holder);
       dir.removeBlock(src, file, ExtendedBlock.getLocalBlock(b));
       if(NameNode.stateChangeLog.isDebugEnabled()) {
@@ -2547,18 +2541,29 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    */
   boolean completeFile(String src, String holder, ExtendedBlock last) 
     throws SafeModeException, UnresolvedLinkException, IOException {
+    if (NameNode.stateChangeLog.isDebugEnabled()) {
+      NameNode.stateChangeLog.debug("DIR* NameSystem.completeFile: " +
+          src + " for " + holder);
+    }
     checkBlock(last);
     boolean success = false;
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-
+      if (isInSafeMode()) {
+        throw new SafeModeException("Cannot complete file " + src, safeMode);
+      }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       success = completeFileInternal(src, holder, 
         ExtendedBlock.getLocalBlock(last));
     } finally {
       writeUnlock();
     }
     getEditLog().logSync();
+    NameNode.stateChangeLog.info("DIR* completeFile: " + src + " is closed by "
+        + holder);
     return success;
   }
 
@@ -2566,14 +2571,6 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       String holder, Block last) throws SafeModeException,
       UnresolvedLinkException, IOException {
     assert hasWriteLock();
-    if (NameNode.stateChangeLog.isDebugEnabled()) {
-      NameNode.stateChangeLog.debug("DIR* NameSystem.completeFile: " +
-          src + " for " + holder);
-    }
-    if (isInSafeMode()) {
-      throw new SafeModeException("Cannot complete file " + src, safeMode);
-    }
-
     INodeFileUnderConstruction pendingFile;
     try {
       pendingFile = checkLease(src, holder);
@@ -2605,9 +2602,6 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     }
 
     finalizeINodeFileUnderConstruction(src, pendingFile);
-
-    NameNode.stateChangeLog.info("DIR* completeFile: " + src + " is closed by "
-        + holder);
     return true;
   }
 
@@ -2701,40 +2695,45 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     try {
       return renameToInt(src, dst);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "rename", src, dst, null);
-      }
+      logAuditEvent(false, "rename", src, dst, null);
       throw e;
     }
   }
 
   private boolean renameToInt(String src, String dst) 
     throws IOException, UnresolvedLinkException {
-    boolean status = false;
-    HdfsFileStatus resultingStat = null;
     if (NameNode.stateChangeLog.isDebugEnabled()) {
       NameNode.stateChangeLog.debug("DIR* NameSystem.renameTo: " + src +
           " to " + dst);
     }
+    if (!DFSUtil.isValidName(dst)) {
+      throw new IOException("Invalid name: " + dst);
+    }
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] srcComponents = FSDirectory.getPathComponentsForReservedPath(src);
+    byte[][] dstComponents = FSDirectory.getPathComponentsForReservedPath(dst);
+    boolean status = false;
+    HdfsFileStatus resultingStat = null;
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-
+      if (isInSafeMode()) {
+        throw new SafeModeException("Cannot rename " + src, safeMode);
+      }
+      src = FSDirectory.resolvePath(src, srcComponents, dir);
+      dst = FSDirectory.resolvePath(dst, dstComponents, dir);
+      checkOperation(OperationCategory.WRITE);
       status = renameToInternal(pc, src, dst);
-      if (status && isAuditEnabled() && isExternalInvocation()) {
-        resultingStat = dir.getFileInfo(dst, false);
+      if (status) {
+        resultingStat = getAuditFileInfo(dst, false);
       }
     } finally {
       writeUnlock();
     }
     getEditLog().logSync();
-    if (status && isAuditEnabled() && isExternalInvocation()) {
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
-                    getRemoteIp(),
-                    "rename", src, dst, resultingStat);
+    if (status) {
+      logAuditEvent(true, "rename", src, dst, resultingStat);
     }
     return status;
   }
@@ -2744,12 +2743,6 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   private boolean renameToInternal(FSPermissionChecker pc, String src, String dst)
     throws IOException, UnresolvedLinkException {
     assert hasWriteLock();
-    if (isInSafeMode()) {
-      throw new SafeModeException("Cannot rename " + src, safeMode);
-    }
-    if (!DFSUtil.isValidName(dst)) {
-      throw new IOException("Invalid name: " + dst);
-    }
     if (isPermissionEnabled) {
       //We should not be doing this.  This is move() not renameTo().
       //but for now,
@@ -2771,42 +2764,44 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   /** Rename src to dst */
   void renameTo(String src, String dst, Options.Rename... options)
       throws IOException, UnresolvedLinkException {
-    HdfsFileStatus resultingStat = null;
     if (NameNode.stateChangeLog.isDebugEnabled()) {
       NameNode.stateChangeLog.debug("DIR* NameSystem.renameTo: with options - "
           + src + " to " + dst);
     }
+    if (!DFSUtil.isValidName(dst)) {
+      throw new InvalidPathException("Invalid name: " + dst);
+    }
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] srcComponents = FSDirectory.getPathComponentsForReservedPath(src);
+    byte[][] dstComponents = FSDirectory.getPathComponentsForReservedPath(dst);
+    HdfsFileStatus resultingStat = null;
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-      renameToInternal(pc, src, dst, options);
-      if (isAuditEnabled() && isExternalInvocation()) {
-        resultingStat = dir.getFileInfo(dst, false); 
+      if (isInSafeMode()) {
+        throw new SafeModeException("Cannot rename " + src, safeMode);
       }
+      src = FSDirectory.resolvePath(src, srcComponents, dir);
+      dst = FSDirectory.resolvePath(dst, dstComponents, dir);
+      renameToInternal(pc, src, dst, options);
+      resultingStat = getAuditFileInfo(dst, false);
     } finally {
       writeUnlock();
     }
     getEditLog().logSync();
-    if (isAuditEnabled() && isExternalInvocation()) {
+    if (resultingStat != null) {
       StringBuilder cmd = new StringBuilder("rename options=");
       for (Rename option : options) {
         cmd.append(option.value()).append(" ");
       }
-      logAuditEvent(UserGroupInformation.getCurrentUser(), getRemoteIp(),
-                    cmd.toString(), src, dst, resultingStat);
+      logAuditEvent(true, cmd.toString(), src, dst, resultingStat);
     }
   }
 
   private void renameToInternal(FSPermissionChecker pc, String src, String dst,
       Options.Rename... options) throws IOException {
     assert hasWriteLock();
-    if (isInSafeMode()) {
-      throw new SafeModeException("Cannot rename " + src, safeMode);
-    }
-    if (!DFSUtil.isValidName(dst)) {
-      throw new InvalidPathException("Invalid name: " + dst);
-    }
     if (isPermissionEnabled) {
       checkParentAccess(pc, src, FsAction.WRITE);
       checkAncestorAccess(pc, dst, FsAction.WRITE);
@@ -2827,11 +2822,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     try {
       return deleteInt(src, recursive);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "delete", src, null, null);
-      }
+      logAuditEvent(false, "delete", src);
       throw e;
     }
   }
@@ -2843,10 +2834,8 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       NameNode.stateChangeLog.debug("DIR* NameSystem.delete: " + src);
     }
     boolean status = deleteInternal(src, recursive, true);
-    if (status && isAuditEnabled() && isExternalInvocation()) {
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
-                    getRemoteIp(),
-                    "delete", src, null, null);
+    if (status) {
+      logAuditEvent(true, "delete", src);
     }
     return status;
   }
@@ -2872,12 +2861,15 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
              IOException {
     BlocksMapUpdateInfo collectedBlocks = new BlocksMapUpdateInfo();
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
       if (isInSafeMode()) {
         throw new SafeModeException("Cannot delete " + src, safeMode);
       }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       if (!recursive && dir.isNonEmptyDirectory(src)) {
         throw new IOException(src + " is non empty");
       }
@@ -2998,35 +2990,59 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   HdfsFileStatus getFileInfo(String src, boolean resolveLink) 
     throws AccessControlException, UnresolvedLinkException,
            StandbyException, IOException {
+    if (!DFSUtil.isValidName(src)) {
+      throw new InvalidPathException("Invalid file name: " + src);
+    }
     HdfsFileStatus stat = null;
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.READ);
+    if (!DFSUtil.isValidName(src)) {
+      throw new InvalidPathException("Invalid file name: " + src);
+    }
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     readLock();
     try {
       checkOperation(OperationCategory.READ);
-
-      if (!DFSUtil.isValidName(src)) {
-        throw new InvalidPathException("Invalid file name: " + src);
-      }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       if (isPermissionEnabled) {
         checkTraverse(pc, src);
       }
       stat = dir.getFileInfo(src, resolveLink);
     } catch (AccessControlException e) {
+      logAuditEvent(false, "getfileinfo", src);
+      throw e;
+    } finally {
+      readUnlock();
+    }
+    logAuditEvent(true, "getfileinfo", src);
+    return stat;
+  }
+  
+  /**
+   * Returns true if the file is closed
+   */
+  boolean isFileClosed(String src) 
+      throws AccessControlException, UnresolvedLinkException,
+      StandbyException, IOException {
+    FSPermissionChecker pc = getPermissionChecker();	
+    checkOperation(OperationCategory.READ);
+    readLock();
+    try {
+      checkOperation(OperationCategory.READ);
+      if (isPermissionEnabled) {
+        checkTraverse(pc, src);
+      }
+      return !INodeFile.valueOf(dir.getINode(src), src).isUnderConstruction();
+    } catch (AccessControlException e) {
       if (isAuditEnabled() && isExternalInvocation()) {
         logAuditEvent(false, UserGroupInformation.getCurrentUser(),
                       getRemoteIp(),
-                      "getfileinfo", src, null, null);
+                      "isFileClosed", src, null, null);
       }
       throw e;
     } finally {
       readUnlock();
     }
-    if (isAuditEnabled() && isExternalInvocation()) {
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
-                    getRemoteIp(),
-                    "getfileinfo", src, null, null);
-    }
-    return stat;
   }
 
   /**
@@ -3037,35 +3053,41 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     try {
       return mkdirsInt(src, permissions, createParent);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "mkdirs", src, null, null);
-      }
+      logAuditEvent(false, "mkdirs", src);
       throw e;
     }
   }
 
   private boolean mkdirsInt(String src, PermissionStatus permissions,
       boolean createParent) throws IOException, UnresolvedLinkException {
-    boolean status = false;
     if(NameNode.stateChangeLog.isDebugEnabled()) {
       NameNode.stateChangeLog.debug("DIR* NameSystem.mkdirs: " + src);
     }
+    if (!DFSUtil.isValidName(src)) {
+      throw new InvalidPathException(src);
+    }
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
+    HdfsFileStatus resultingStat = null;
+    boolean status = false;
     writeLock();
     try {
-      checkOperation(OperationCategory.WRITE);
+      checkOperation(OperationCategory.WRITE);   
+      if (isInSafeMode()) {
+        throw new SafeModeException("Cannot create directory " + src, safeMode);
+      }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       status = mkdirsInternal(pc, src, permissions, createParent);
+      if (status) {
+        resultingStat = dir.getFileInfo(src, false);
+      }
     } finally {
       writeUnlock();
     }
     getEditLog().logSync();
-    if (status && isAuditEnabled() && isExternalInvocation()) {
-      final HdfsFileStatus stat = dir.getFileInfo(src, false);
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
-                    getRemoteIp(),
-                    "mkdirs", src, null, stat);
+    if (status) {
+      logAuditEvent(true, "mkdirs", src, null, resultingStat);
     }
     return status;
   }
@@ -3077,9 +3099,6 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       PermissionStatus permissions, boolean createParent) 
       throws IOException, UnresolvedLinkException {
     assert hasWriteLock();
-    if (isInSafeMode()) {
-      throw new SafeModeException("Cannot create directory " + src, safeMode);
-    }
     if (isPermissionEnabled) {
       checkTraverse(pc, src);
     }
@@ -3087,9 +3106,6 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       // all the users of mkdirs() are used to expect 'true' even if
       // a new directory is not created.
       return true;
-    }
-    if (!DFSUtil.isValidName(src)) {
-      throw new InvalidPathException(src);
     }
     if (isPermissionEnabled) {
       checkAncestorAccess(pc, src, FsAction.WRITE);
@@ -3111,11 +3127,13 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
 
   ContentSummary getContentSummary(String src) throws AccessControlException,
       FileNotFoundException, UnresolvedLinkException, StandbyException {
-    FSPermissionChecker pc = new FSPermissionChecker(fsOwnerShortUserName,
-        supergroup);
+    FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.READ);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     readLock();
     try {
       checkOperation(OperationCategory.READ);
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       if (isPermissionEnabled) {
         checkPermission(pc, src, false, null, null, null, FsAction.READ_EXECUTE);
       }
@@ -3129,10 +3147,13 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    * Set the namespace quota and diskspace quota for a directory.
    * See {@link ClientProtocol#setQuota(String, long, long)} for the 
    * contract.
+   * 
+   * Note: This does not support ".inodes" relative path.
    */
   void setQuota(String path, long nsQuota, long dsQuota) 
       throws IOException, UnresolvedLinkException {
     checkSuperuserPrivilege();
+    checkOperation(OperationCategory.WRITE);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
@@ -3156,12 +3177,15 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   void fsync(String src, String clientName, long lastBlockLength) 
       throws IOException, UnresolvedLinkException {
     NameNode.stateChangeLog.info("BLOCK* fsync: " + src + " for " + clientName);
+    checkOperation(OperationCategory.WRITE);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
       if (isInSafeMode()) {
         throw new SafeModeException("Cannot fsync file " + src, safeMode);
       }
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
       INodeFileUnderConstruction pendingFile  = checkLease(src, clientName);
       if (lastBlockLength > 0) {
         pendingFile.updateLengthOfLastBlock(lastBlockLength);
@@ -3359,6 +3383,14 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       boolean closeFile, boolean deleteblock, DatanodeID[] newtargets,
       String[] newtargetstorages)
       throws IOException, UnresolvedLinkException {
+    LOG.info("commitBlockSynchronization(lastblock=" + lastblock
+             + ", newgenerationstamp=" + newgenerationstamp
+             + ", newlength=" + newlength
+             + ", newtargets=" + Arrays.asList(newtargets)
+             + ", closeFile=" + closeFile
+             + ", deleteBlock=" + deleteblock
+             + ")");
+    checkOperation(OperationCategory.WRITE);
     String src = "";
     writeLock();
     try {
@@ -3371,13 +3403,6 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
           "Cannot commitBlockSynchronization while in safe mode",
           safeMode);
       }
-      LOG.info("commitBlockSynchronization(lastblock=" + lastblock
-               + ", newgenerationstamp=" + newgenerationstamp
-               + ", newlength=" + newlength
-               + ", newtargets=" + Arrays.asList(newtargets)
-               + ", closeFile=" + closeFile
-               + ", deleteBlock=" + deleteblock
-               + ")");
       final BlockInfo storedBlock = blockManager.getStoredBlock(ExtendedBlock
         .getLocalBlock(lastblock));
       if (storedBlock == null) {
@@ -3463,10 +3488,10 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    * Renew the lease(s) held by the given client
    */
   void renewLease(String holder) throws IOException {
+    checkOperation(OperationCategory.WRITE);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-
       if (isInSafeMode()) {
         throw new SafeModeException("Cannot renew lease for " + holder, safeMode);
       }
@@ -3494,11 +3519,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     try {
       return getListingInt(src, startAfter, needLocation);
     } catch (AccessControlException e) {
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(false, UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "listStatus", src, null, null);
-      }
+      logAuditEvent(false, "listStatus", src);
       throw e;
     }
   }
@@ -3508,9 +3529,12 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     throws AccessControlException, UnresolvedLinkException, IOException {
     DirectoryListing dl;
     FSPermissionChecker pc = getPermissionChecker();
+    checkOperation(OperationCategory.READ);
+    byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     readLock();
     try {
       checkOperation(OperationCategory.READ);
+      src = FSDirectory.resolvePath(src, pathComponents, dir);
 
       if (isPermissionEnabled) {
         if (dir.isDir(src)) {
@@ -3519,11 +3543,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
           checkTraverse(pc, src);
         }
       }
-      if (isAuditEnabled() && isExternalInvocation()) {
-        logAuditEvent(UserGroupInformation.getCurrentUser(),
-                      getRemoteIp(),
-                      "listStatus", src, null, null);
-      }
+      logAuditEvent(true, "listStatus", src);
       dl = dir.getListing(src, startAfter, needLocation);
     } finally {
       readUnlock();
@@ -3735,40 +3755,47 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     return stats;
   }
 
-  /**
-   * Total raw bytes including non-dfs used space.
-   */
   @Override // FSNamesystemMBean
+  @Metric({"CapacityTotal",
+      "Total raw capacity of data nodes in bytes"})
   public long getCapacityTotal() {
     return datanodeStatistics.getCapacityTotal();
   }
 
-  @Metric
+  @Metric({"CapacityTotalGB",
+      "Total raw capacity of data nodes in GB"})
   public float getCapacityTotalGB() {
     return DFSUtil.roundBytesToGB(getCapacityTotal());
   }
 
-  /**
-   * Total used space by data nodes
-   */
   @Override // FSNamesystemMBean
+  @Metric({"CapacityUsed",
+      "Total used capacity across all data nodes in bytes"})
   public long getCapacityUsed() {
     return datanodeStatistics.getCapacityUsed();
   }
 
-  @Metric
+  @Metric({"CapacityUsedGB",
+      "Total used capacity across all data nodes in GB"})
   public float getCapacityUsedGB() {
     return DFSUtil.roundBytesToGB(getCapacityUsed());
   }
 
-  @Override
+  @Override // FSNamesystemMBean
+  @Metric({"CapacityRemaining", "Remaining capacity in bytes"})
   public long getCapacityRemaining() {
     return datanodeStatistics.getCapacityRemaining();
   }
 
-  @Metric
+  @Metric({"CapacityRemainingGB", "Remaining capacity in GB"})
   public float getCapacityRemainingGB() {
     return DFSUtil.roundBytesToGB(getCapacityRemaining());
+  }
+
+  @Metric({"CapacityUsedNonDFS",
+      "Total space used by data nodes for non DFS purposes in bytes"})
+  public long getCapacityUsedNonDFS() {
+    return datanodeStatistics.getCapacityUsedNonDFS();
   }
 
   /**
@@ -3791,10 +3818,12 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   }
 
   DatanodeInfo[] datanodeReport(final DatanodeReportType type
-      ) throws AccessControlException {
+      ) throws AccessControlException, StandbyException {
     checkSuperuserPrivilege();
+    checkOperation(OperationCategory.UNCHECKED);
     readLock();
     try {
+      checkOperation(OperationCategory.UNCHECKED);
       final DatanodeManager dm = getBlockManager().getDatanodeManager();      
       final List<DatanodeDescriptor> results = dm.getDatanodeListForReport(type);
 
@@ -3818,8 +3847,10 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    */
   void saveNamespace() throws AccessControlException, IOException {
     checkSuperuserPrivilege();
+    checkOperation(OperationCategory.UNCHECKED);
     readLock();
     try {
+      checkOperation(OperationCategory.UNCHECKED);
       if (!isInSafeMode()) {
         throw new IOException("Safe mode should be turned ON " +
                               "in order to create namespace image.");
@@ -3837,10 +3868,13 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    * 
    * @throws AccessControlException if superuser privilege is violated.
    */
-  boolean restoreFailedStorage(String arg) throws AccessControlException {
+  boolean restoreFailedStorage(String arg) throws AccessControlException,
+      StandbyException {
     checkSuperuserPrivilege();
+    checkOperation(OperationCategory.UNCHECKED);
     writeLock();
     try {
+      checkOperation(OperationCategory.UNCHECKED);
       
       // if it is disabled - enable it and vice versa.
       if(arg.equals("check"))
@@ -3861,6 +3895,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     
   void finalizeUpgrade() throws IOException {
     checkSuperuserPrivilege();
+    checkOperation(OperationCategory.WRITE);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
@@ -4600,6 +4635,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
 
   CheckpointSignature rollEditLog() throws IOException {
     checkSuperuserPrivilege();
+    checkOperation(OperationCategory.JOURNAL);
     writeLock();
     try {
       checkOperation(OperationCategory.JOURNAL);
@@ -4617,6 +4653,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
                                 NamenodeRegistration bnReg, // backup node
                                 NamenodeRegistration nnReg) // active name-node
   throws IOException {
+    checkOperation(OperationCategory.CHECKPOINT);
     writeLock();
     try {
       checkOperation(OperationCategory.CHECKPOINT);
@@ -4635,6 +4672,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
 
   void endCheckpoint(NamenodeRegistration registration,
                             CheckpointSignature sig) throws IOException {
+    checkOperation(OperationCategory.CHECKPOINT);
     readLock();
     try {
       checkOperation(OperationCategory.CHECKPOINT);
@@ -4835,8 +4873,15 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    * shutdown FSNamesystem
    */
   void shutdown() {
-    if (mbeanName != null)
+    if (mbeanName != null) {
       MBeans.unregister(mbeanName);
+    }
+    if (dir != null) {
+      dir.shutdown();
+    }
+    if (blockManager != null) {
+      blockManager.shutdown();
+    }
   }
   
 
@@ -4923,11 +4968,11 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    * Client is reporting some bad block locations.
    */
   void reportBadBlocks(LocatedBlock[] blocks) throws IOException {
+    checkOperation(OperationCategory.WRITE);
+    NameNode.stateChangeLog.info("*DIR* reportBadBlocks");
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-      
-      NameNode.stateChangeLog.info("*DIR* reportBadBlocks");
       for (int i = 0; i < blocks.length; i++) {
         ExtendedBlock blk = blocks[i].getBlock();
         DatanodeInfo[] nodes = blocks[i].getLocations();
@@ -4957,6 +5002,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   LocatedBlock updateBlockForPipeline(ExtendedBlock block, 
       String clientName) throws IOException {
     LocatedBlock locatedBlock;
+    checkOperation(OperationCategory.WRITE);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
@@ -4988,6 +5034,13 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   void updatePipeline(String clientName, ExtendedBlock oldBlock, 
       ExtendedBlock newBlock, DatanodeID[] newNodes)
       throws IOException {
+    checkOperation(OperationCategory.WRITE);
+    LOG.info("updatePipeline(block=" + oldBlock
+             + ", newGenerationStamp=" + newBlock.getGenerationStamp()
+             + ", newLength=" + newBlock.getNumBytes()
+             + ", newNodes=" + Arrays.asList(newNodes)
+             + ", clientName=" + clientName
+             + ")");
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
@@ -4997,12 +5050,6 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       }
       assert newBlock.getBlockId()==oldBlock.getBlockId() : newBlock + " and "
         + oldBlock + " has different block identifier";
-      LOG.info("updatePipeline(block=" + oldBlock
-               + ", newGenerationStamp=" + newBlock.getGenerationStamp()
-               + ", newLength=" + newBlock.getNumBytes()
-               + ", newNodes=" + Arrays.asList(newNodes)
-               + ", clientName=" + clientName
-               + ")");
       updatePipelineInternal(clientName, oldBlock, newBlock, newNodes);
     } finally {
       writeUnlock();
@@ -5115,8 +5162,10 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    */
   void releaseBackupNode(NamenodeRegistration registration)
     throws IOException {
+    checkOperation(OperationCategory.WRITE);
     writeLock();
     try {
+      checkOperation(OperationCategory.WRITE);
       if(getFSImage().getStorage().getNamespaceID()
          != registration.getNamespaceID())
         throw new IOException("Incompatible namespaceIDs: "
@@ -5155,6 +5204,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   Collection<CorruptFileBlockInfo> listCorruptFileBlocks(String path,
 	String[] cookieTab) throws IOException {
     checkSuperuserPrivilege();
+    checkOperation(OperationCategory.READ);
     readLock();
     try {
       checkOperation(OperationCategory.READ);
@@ -5247,10 +5297,10 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   Token<DelegationTokenIdentifier> getDelegationToken(Text renewer)
       throws IOException {
     Token<DelegationTokenIdentifier> token;
+    checkOperation(OperationCategory.WRITE);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
-
       if (isInSafeMode()) {
         throw new SafeModeException("Cannot issue delegation token", safeMode);
       }
@@ -5263,7 +5313,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
         return null;
       }
 
-      UserGroupInformation ugi = UserGroupInformation.getCurrentUser();
+      UserGroupInformation ugi = getRemoteUser();
       String user = ugi.getUserName();
       Text owner = new Text(user);
       Text realUser = null;
@@ -5293,6 +5343,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   long renewDelegationToken(Token<DelegationTokenIdentifier> token)
       throws InvalidToken, IOException {
     long expiryTime;
+    checkOperation(OperationCategory.WRITE);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
@@ -5304,7 +5355,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
         throw new IOException(
             "Delegation Token can be renewed only with kerberos or web authentication");
       }
-      String renewer = UserGroupInformation.getCurrentUser().getShortUserName();
+      String renewer = getRemoteUser().getShortUserName();
       expiryTime = dtSecretManager.renewToken(token, renewer);
       DelegationTokenIdentifier id = new DelegationTokenIdentifier();
       ByteArrayInputStream buf = new ByteArrayInputStream(token.getIdentifier());
@@ -5325,6 +5376,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    */
   void cancelDelegationToken(Token<DelegationTokenIdentifier> token)
       throws IOException {
+    checkOperation(OperationCategory.WRITE);
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);
@@ -5332,7 +5384,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       if (isInSafeMode()) {
         throw new SafeModeException("Cannot cancel delegation token", safeMode);
       }
-      String canceller = UserGroupInformation.getCurrentUser().getUserName();
+      String canceller = getRemoteUser().getUserName();
       DelegationTokenIdentifier id = dtSecretManager
         .cancelToken(token, canceller);
       getEditLog().logCancelDelegationToken(id);
@@ -5373,6 +5425,21 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     getEditLog().logSync();
   }
   
+  /**
+   * Log the cancellation of expired tokens to edit logs
+   * 
+   * @param id token identifier to cancel
+   */
+  public void logExpireDelegationToken(DelegationTokenIdentifier id) {
+    assert !isInSafeMode() :
+      "this should never be called while in safemode, since we stop " +
+      "the DT manager before entering safemode!";
+    // No need to hold FSN lock since we don't access any internal
+    // structures, and this is stopped before the FSN shuts itself
+    // down, etc.
+    getEditLog().logCancelDelegationToken(id);
+  }  
+  
   private void logReassignLease(String leaseHolder, String src,
       String newHolder) {
     assert hasWriteLock();
@@ -5401,7 +5468,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    */
   private AuthenticationMethod getConnectionAuthenticationMethod()
       throws IOException {
-    UserGroupInformation ugi = UserGroupInformation.getCurrentUser();
+    UserGroupInformation ugi = getRemoteUser();
     AuthenticationMethod authMethod = ugi.getAuthenticationMethod();
     if (authMethod == AuthenticationMethod.PROXY) {
       authMethod = ugi.getRealUser().getAuthenticationMethod();
@@ -5425,12 +5492,22 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     return NamenodeWebHdfsMethods.getRemoteIp();
   }
   
+  // optimize ugi lookup for RPC operations to avoid a trip through
+  // UGI.getCurrentUser which is synch'ed
+  private static UserGroupInformation getRemoteUser() throws IOException {
+    UserGroupInformation ugi = null;
+    if (Server.isRpcInvocation()) {
+      ugi = Server.getRemoteUser();
+    }
+    return (ugi != null) ? ugi : UserGroupInformation.getCurrentUser();
+  }
+  
   /**
    * Log fsck event in the audit log 
    */
   void logFsckEvent(String src, InetAddress remoteAddress) throws IOException {
     if (isAuditEnabled()) {
-      logAuditEvent(UserGroupInformation.getCurrentUser(),
+      logAuditEvent(true, getRemoteUser(),
                     remoteAddress,
                     "fsck", src, null, null);
     }
