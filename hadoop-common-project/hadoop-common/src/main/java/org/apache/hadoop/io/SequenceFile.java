@@ -1842,9 +1842,18 @@ public class SequenceFile {
      */
     private void init(boolean tempReader) throws IOException {
       byte[] versionBlock = new byte[VERSION.length];
-      in.readFully(versionBlock);
+      boolean canReadSeqFileHeader = true;
 
-      if ((versionBlock[0] != VERSION[0]) ||
+      // Try to read sequence file header.
+      try {
+        in.readFully(versionBlock);
+      } catch (EOFException e) {
+        LOG.error("Failed to read sequence file header: " + this);
+        canReadSeqFileHeader = false;
+      }
+
+      if (!canReadSeqFileHeader ||
+          (versionBlock[0] != VERSION[0]) ||
           (versionBlock[1] != VERSION[1]) ||
           (versionBlock[2] != VERSION[2]))
         throw new IOException(this + " not a SequenceFile");
