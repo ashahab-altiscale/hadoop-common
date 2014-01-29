@@ -18,24 +18,7 @@
 
 package org.apache.hadoop.yarn.server.nodemanager.containermanager.launcher;
 
-import static org.apache.hadoop.fs.CreateFlag.CREATE;
-import static org.apache.hadoop.fs.CreateFlag.OVERWRITE;
-
-import java.io.DataOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PrintStream;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicBoolean;
-
+import com.google.common.collect.Lists;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -75,6 +58,25 @@ import org.apache.hadoop.yarn.server.nodemanager.util.ProcessIdFileReader;
 import org.apache.hadoop.yarn.util.Apps;
 import org.apache.hadoop.yarn.util.AuxiliaryServiceHelper;
 import org.apache.hadoop.yarn.util.ConverterUtils;
+
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import static org.apache.hadoop.fs.CreateFlag.CREATE;
+import static org.apache.hadoop.fs.CreateFlag.OVERWRITE;
 
 public class ContainerLaunch implements Callable<Integer> {
 
@@ -122,6 +124,7 @@ public class ContainerLaunch implements Callable<Integer> {
     this.maxKillWaitTime =
         conf.getLong(YarnConfiguration.NM_PROCESS_KILL_WAIT_MS,
             YarnConfiguration.DEFAULT_NM_PROCESS_KILL_WAIT_MS);
+    LOG.debug(String.format("Created launch with context: %s, conf: %s, app: %s, container: %s", context, conf, app, container));
   }
 
   @Override
@@ -188,6 +191,12 @@ public class ContainerLaunch implements Callable<Integer> {
           dirsHandler.getLocalPathForWrite(
               getContainerPrivateDir(appIdStr, containerIdStr) + Path.SEPARATOR
                   + CONTAINER_SCRIPT);
+
+      Path nmPrivateDockerScriptPath =
+              dirsHandler.getLocalPathForWrite(
+                      getContainerPrivateDir(appIdStr, containerIdStr) + Path.SEPARATOR
+                              + "docker.sh");
+
       Path nmPrivateTokensPath =
           dirsHandler.getLocalPathForWrite(
               getContainerPrivateDir(appIdStr, containerIdStr)
@@ -196,6 +205,7 @@ public class ContainerLaunch implements Callable<Integer> {
                       containerIdStr));
 
       DataOutputStream containerScriptOutStream = null;
+      DataOutputStream dockerScriptOutStream = null;
       DataOutputStream tokensOutStream = null;
 
       // Select the working directory for the container
@@ -240,6 +250,9 @@ public class ContainerLaunch implements Callable<Integer> {
         containerScriptOutStream =
           lfs.create(nmPrivateContainerScriptPath,
               EnumSet.of(CREATE, OVERWRITE));
+        dockerScriptOutStream =
+                lfs.create(nmPrivateDockerScriptPath,
+                        EnumSet.of(CREATE, OVERWRITE));
 
         // Set the token location too.
         environment.put(
@@ -253,6 +266,8 @@ public class ContainerLaunch implements Callable<Integer> {
         // Write out the environment
         writeLaunchEnv(containerScriptOutStream, environment, localResources,
             launchContext.getCommands());
+
+        writeLaunchEnv(dockerScriptOutStream, Lists.newArrayList("sudo docker run -name %s -u %s cont ls /home"));
         
         // /////////// End of writing out container-script
 
@@ -705,7 +720,43 @@ public class ContainerLaunch implements Callable<Integer> {
           meta.getKey(), meta.getValue(), environment);
     }
   }
-    
+
+public static void writeLaunchEnv(OutputStream out,
+                           List<String> command)
+        throws IOException {
+  ShellScriptBuilder sb = Shell.WINDOWS ? new WindowsShellScriptBuilder() :
+          new UnixShellScriptBuilder();
+  sb.command(command);
+
+  PrintStream pout = null;
+  PrintStream ps = null;
+  ByteArrayOutputStream baos = null;
+  try {
+    baos = new ByteArrayOutputStream();
+    pout = new PrintStream(out);
+    ps = new PrintStream(baos);
+    sb.write(pout);
+    sb.write(ps);
+  } finally {
+    if (out != null) {
+      out.close();
+    }
+    if (ps != null) {
+      ps.close();
+    }
+    if (baos != null) {
+      LOG.info("docker script: " + baos.toString());
+    }
+  }
+}
+/**
+ * This is the inner container script
+  * @param out
+ * @param environment
+ * @param resources
+ * @param command
+ * @throws IOException
+ */
   static void writeLaunchEnv(OutputStream out,
       Map<String,String> environment, Map<Path,List<String>> resources,
       List<String> command)
@@ -721,6 +772,7 @@ public class ContainerLaunch implements Callable<Integer> {
       for (Map.Entry<Path,List<String>> entry : resources.entrySet()) {
         for (String linkName : entry.getValue()) {
           sb.symlink(entry.getKey(), new Path(linkName));
+          // The paths should be truncated
         }
       }
     }
@@ -728,12 +780,23 @@ public class ContainerLaunch implements Callable<Integer> {
     sb.command(command);
 
     PrintStream pout = null;
+    PrintStream ps = null;
+    ByteArrayOutputStream baos = null;
     try {
+      baos = new ByteArrayOutputStream();
       pout = new PrintStream(out);
+      ps = new PrintStream(baos);
       sb.write(pout);
+      sb.write(ps);
     } finally {
       if (out != null) {
         out.close();
+      }
+      if (ps != null) {
+        ps.close();
+      }
+      if (baos != null) {
+        LOG.info("launch script: " + baos.toString());
       }
     }
   }

@@ -17,27 +17,7 @@
 */
 package org.apache.hadoop.yarn.server.nodemanager.containermanager.localizer;
 
-import java.io.DataInputStream;
-import java.io.File;
-import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.security.PrivilegedAction;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletionService;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorCompletionService;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -68,7 +48,26 @@ import org.apache.hadoop.yarn.server.nodemanager.containermanager.localizer.secu
 import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.hadoop.yarn.util.FSDownload;
 
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.security.PrivilegedAction;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 public class ContainerLocalizer {
 
@@ -111,6 +110,7 @@ public class ContainerLocalizer {
     this.conf = new Configuration();
     this.appCacheDirContextName = String.format(APPCACHE_CTXT_FMT, appId);
     this.pendingResources = new HashMap<LocalResource,Future<Path>>();
+    LOG.info(String.format("Running container as: %s, %s, %s, %s, %s, %s", lfs, user, appId, localDirs, localizerId, recordFactory));
   }
 
   LocalizationProtocol getProxy(final InetSocketAddress nmAddr) {
@@ -194,6 +194,7 @@ public class ContainerLocalizer {
   Callable<Path> download(Path path, LocalResource rsrc,
       UserGroupInformation ugi) throws IOException {
     DiskChecker.checkDir(new File(path.toUri().getRawPath()));
+    LOG.info("Downloading: " + path);
     return new FSDownload(lfs, ugi, conf, path, rsrc);
   }
 
@@ -284,6 +285,7 @@ public class ContainerLocalizer {
       if (fPath.isDone()) {
         try {
           Path localPath = fPath.get();
+          LOG.debug("localPath: " + localPath);
           stat.setLocalPath(
               ConverterUtils.getYarnUrlFromPath(localPath));
           stat.setLocalSize(

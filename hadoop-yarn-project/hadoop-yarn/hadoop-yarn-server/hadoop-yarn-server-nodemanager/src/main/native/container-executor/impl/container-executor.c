@@ -412,7 +412,9 @@ static int create_container_directories(const char* user, const char *app_id,
             "Either app_id, container_id or the user passed is null.\n");
     return -1;
   }
-
+  fprintf(LOGFILE,
+              "In create_container_directories with app_id=%s, container_id=%s, user=%s, local_dir=%s, log_dir=%s, work_dir=%s.\n",
+              app_id, container_id, user, local_dir, log_dir, work_dir);
   int result = -1;
   char* const* local_dir_ptr;
   for(local_dir_ptr = local_dir; *local_dir_ptr != NULL; ++local_dir_ptr) {
@@ -422,6 +424,8 @@ static int create_container_directories(const char* user, const char *app_id,
       return -1;
     }
     if (mkdirs(container_dir, perms) == 0) {
+      fprintf(LOGFILE,
+                  "Created container_dir %s.\n", container_dir);
       result = 0;
     }
     // continue on to create other work directories
@@ -789,7 +793,7 @@ int initialize_app(const char *user, const char *app_id,
     fprintf(LOGFILE, "Either app_id is null or the user passed is null.\n");
     return INVALID_ARGUMENT_NUMBER;
   }
-
+  fprintf(LOGFILE, "Initialize app: app_id=%s, user=%s.\n", app_id, user);
   // create the user directory on all disks
   int result = initialize_user(user, local_dirs);
   if (result != 0) {
@@ -864,6 +868,7 @@ int initialize_app(const char *user, const char *app_id,
     fprintf(LOGFILE, "Failed to chdir to app dir - %s\n", strerror(errno));
     return -1;
   }
+
   execvp(args[0], args);
   fprintf(ERRORFILE, "Failure to exec app initialization process - %s\n",
 	  strerror(errno));
@@ -977,6 +982,7 @@ int launch_container_as_user(const char *user, const char *app_id,
 	    strerror(errno));
     goto cleanup;
   }
+  // This executes the script and launches the container
   if (execlp(script_file_dest, script_file_dest, NULL) != 0) {
     fprintf(LOGFILE, "Couldn't execute the container launch file %s - %s", 
             script_file_dest, strerror(errno));

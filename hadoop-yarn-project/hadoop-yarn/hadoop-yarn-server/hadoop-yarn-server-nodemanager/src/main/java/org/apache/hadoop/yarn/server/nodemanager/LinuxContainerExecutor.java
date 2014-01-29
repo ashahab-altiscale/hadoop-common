@@ -18,13 +18,6 @@
 
 package org.apache.hadoop.yarn.server.nodemanager;
 
-import java.io.File;
-import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -42,6 +35,15 @@ import org.apache.hadoop.yarn.server.nodemanager.containermanager.localizer.Cont
 import org.apache.hadoop.yarn.server.nodemanager.util.DefaultLCEResourcesHandler;
 import org.apache.hadoop.yarn.server.nodemanager.util.LCEResourcesHandler;
 import org.apache.hadoop.yarn.util.ConverterUtils;
+
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.LineNumberReader;
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 public class LinuxContainerExecutor extends ContainerExecutor {
 
@@ -140,9 +142,9 @@ public class LinuxContainerExecutor extends ContainerExecutor {
             "--checksetup"));
     String[] commandArray = command.toArray(new String[command.size()]);
     ShellCommandExecutor shExec = new ShellCommandExecutor(commandArray);
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("checkLinuxExecutorSetup: " + Arrays.toString(commandArray));
-    }
+
+    LOG.info("checkLinuxExecutorSetup: " + Arrays.toString(commandArray));
+
     try {
       shExec.execute();
     } catch (ExitCodeException e) {
@@ -165,15 +167,21 @@ public class LinuxContainerExecutor extends ContainerExecutor {
 
     List<String> command = new ArrayList<String>();
     addSchedPriorityCommand(command);
-    command.addAll(Arrays.asList(containerExecutorExe, 
-                   user, 
-                   Integer.toString(Commands.INITIALIZE_CONTAINER.getValue()),
-                   appId,
-                   nmPrivateContainerTokensPath.toUri().getPath().toString(),
-                   StringUtils.join(",", localDirs),
-                   StringUtils.join(",", logDirs)));
+    command.addAll(Arrays.asList(containerExecutorExe,
+            user,
+            Integer.toString(Commands.INITIALIZE_CONTAINER.getValue()),
+            appId,
+            nmPrivateContainerTokensPath.toUri().getPath().toString(),
+            StringUtils.join(",", localDirs),
+            StringUtils.join(",", logDirs)));
 
-    File jvm =                                  // use same jvm as parent
+    // A base yarn docker image should come with hadoop installed
+    // so that it can run this. No time to copy all this at run time.
+    // This will first create the user and application directories inside the container
+    // and then run the localizer
+    // At the end, the job-jar and other related resources would be downloaded into
+    // the container.
+    File jvm =                                 // use same jvm as parent
       new File(new File(System.getProperty("java.home"), "bin"), "java");
     command.add(jvm.toString());
     command.add("-classpath");
@@ -194,15 +202,12 @@ public class LinuxContainerExecutor extends ContainerExecutor {
     String[] commandArray = command.toArray(new String[command.size()]);
     ShellCommandExecutor shExec = new ShellCommandExecutor(commandArray);
     // TODO: DEBUG
-    LOG.info("initApplication: " + Arrays.toString(commandArray));
     if (LOG.isDebugEnabled()) {
       LOG.debug("initApplication: " + Arrays.toString(commandArray));
     }
     try {
       shExec.execute();
-      if (LOG.isDebugEnabled()) {
-        logOutput(shExec.getOutput());
-      }
+      logOutput(shExec.getOutput());
     } catch (ExitCodeException e) {
       int exitCode = shExec.getExitCode();
       LOG.warn("Exit code from container " + locId + " startLocalizer is : "
@@ -249,6 +254,17 @@ public class LinuxContainerExecutor extends ContainerExecutor {
             container.getLaunchContext().getEnvironment()); // sanitized env
         // DEBUG
         LOG.info("launchContainer: " + Arrays.toString(commandArray));
+        LineNumberReader reader =  new LineNumberReader(new FileReader(nmPrivateCotainerScriptPath.toUri().getPath().toString()));
+        while (reader.ready()){
+          LOG.info(reader.readLine());
+        }
+        reader.close();
+        /*launchContainer: [/opt/hadoop-2.2.0/bin/container-executor, alti-test-01, 1, application_1389838459997_0001,
+        container_1389838459997_0001_01_000003, /tmp/hadoop-yarn/nm-local-dir/usercache/alti-test-01/appcache/application_1389838459997_0001/container_1389838459997_0001_01_000003,
+        /tmp/hadoop-yarn/nm-local-dir/nmPrivate/application_1389838459997_0001/container_1389838459997_0001_01_000003/launch_container.sh,
+        /tmp/hadoop-yarn/nm-local-dir/nmPrivate/application_1389838459997_0001/container_1389838459997_0001_01_000003/container_1389838459997_0001_01_000003.tokens,
+        /tmp/hadoop-yarn/nm-local-dir/nmPrivate/container_1389838459997_0001_01_000003.pid, /tmp/hadoop-yarn/nm-local-dir,
+        /opt/hadoop-2.2.0/logs/userlogs, cgroups=/cgroup/cpu/hadoop-yarn/container_1389838459997_0001_01_000003/tasks*/
         shExec.execute();
         if (LOG.isDebugEnabled()) {
           logOutput(shExec.getOutput());
@@ -366,9 +382,8 @@ public class LinuxContainerExecutor extends ContainerExecutor {
     String[] commandArray = command.toArray(new String[command.size()]);
     ShellCommandExecutor shExec = new ShellCommandExecutor(commandArray);
 
-    if (LOG.isDebugEnabled()) {
-        LOG.debug("mountCgroups: " + Arrays.toString(commandArray));
-    }
+    LOG.info("mountCgroups: " + Arrays.toString(commandArray));
+
 
     try {
         shExec.execute();

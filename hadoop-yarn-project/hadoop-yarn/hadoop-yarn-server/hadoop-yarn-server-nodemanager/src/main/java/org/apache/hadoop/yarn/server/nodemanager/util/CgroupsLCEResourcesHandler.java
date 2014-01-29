@@ -18,6 +18,15 @@
 
 package org.apache.hadoop.yarn.server.nodemanager.util;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileUtil;
+import org.apache.hadoop.yarn.api.records.ContainerId;
+import org.apache.hadoop.yarn.api.records.Resource;
+import org.apache.hadoop.yarn.conf.YarnConfiguration;
+import org.apache.hadoop.yarn.server.nodemanager.LinuxContainerExecutor;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
@@ -31,15 +40,6 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileUtil;
-import org.apache.hadoop.yarn.api.records.ContainerId;
-import org.apache.hadoop.yarn.api.records.Resource;
-import org.apache.hadoop.yarn.conf.YarnConfiguration;
-import org.apache.hadoop.yarn.server.nodemanager.LinuxContainerExecutor;
 
 public class CgroupsLCEResourcesHandler implements LCEResourcesHandler {
 
@@ -97,6 +97,7 @@ public class CgroupsLCEResourcesHandler implements LCEResourcesHandler {
       ArrayList<String> cgroupKVs = new ArrayList<String>();
       cgroupKVs.add(CONTROLLER_CPU + "=" + cgroupMountPath + "/" +
                     CONTROLLER_CPU);
+      LOG.info("mounting cgroups: " + cgroupKVs);
       lce.mountCgroups(cgroupKVs, cgroupPrefix);
     }
 
@@ -309,7 +310,7 @@ public class CgroupsLCEResourcesHandler implements LCEResourcesHandler {
         controllerPaths.put(CONTROLLER_CPU, controllerPath);
       } else {
         throw new IOException("Not able to enforce cpu weights; cannot write "
-            + "to cgroup at: " + controllerPath);
+            + "to cgroup at: " + f.getAbsolutePath() + " for user: " + System.getProperty("user.name"));
       }
     } else {
       throw new IOException("Not able to enforce cpu weights; cannot find "

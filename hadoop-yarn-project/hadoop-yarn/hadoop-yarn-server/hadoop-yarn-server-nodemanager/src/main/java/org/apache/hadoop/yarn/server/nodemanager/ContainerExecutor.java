@@ -18,6 +18,20 @@
 
 package org.apache.hadoop.yarn.server.nodemanager;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configurable;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.permission.FsPermission;
+import org.apache.hadoop.util.Shell;
+import org.apache.hadoop.util.StringUtils;
+import org.apache.hadoop.yarn.api.records.ContainerId;
+import org.apache.hadoop.yarn.conf.YarnConfiguration;
+import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.Container;
+import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.ContainerDiagnosticsUpdateEvent;
+import org.apache.hadoop.yarn.server.nodemanager.util.ProcessIdFileReader;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
@@ -28,21 +42,6 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.ReadLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
-
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.conf.Configurable;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.permission.FsPermission;
-import org.apache.hadoop.util.Shell.ShellCommandExecutor;
-import org.apache.hadoop.yarn.api.records.ContainerId;
-import org.apache.hadoop.yarn.conf.YarnConfiguration;
-import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.Container;
-import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.ContainerDiagnosticsUpdateEvent;
-import org.apache.hadoop.yarn.server.nodemanager.util.ProcessIdFileReader;
-import org.apache.hadoop.util.Shell;
-import org.apache.hadoop.util.StringUtils;
 
 public abstract class ContainerExecutor implements Configurable {
 
@@ -215,8 +214,35 @@ public abstract class ContainerExecutor implements Configurable {
       retCommand.addAll(Arrays.asList("bash", command));
       return retCommand.toArray(new String[retCommand.size()]);
     }
-  }   
+  }
 
+
+/**
+ * Return a command to execute the given command in OS shell.
+ * On Windows, the passed in groupId can be used to launch
+ * and associate the given groupId in a process group. On
+ * non-Windows, groupId is ignored.
+ */
+protected static String[] getRunCommands(String[] commands, String groupId,
+                                        Configuration conf) {
+  int containerSchedPriorityAdjustment =
+          YarnConfiguration.DEFAULT_NM_CONTAINER_EXECUTOR_SCHED_PRIORITY;
+  if (conf.get(YarnConfiguration.NM_CONTAINER_EXECUTOR_SCHED_PRIORITY) !=
+          null) {
+    containerSchedPriorityAdjustment = conf
+            .getInt(YarnConfiguration.NM_CONTAINER_EXECUTOR_SCHED_PRIORITY, 0);
+  }
+
+
+    List<String> retCommand = new ArrayList<String>();
+    LOG.debug("commandArray: " + Arrays.toString(commands));
+    retCommand.addAll(Arrays.asList("nice", "-n",
+            Integer.toString(containerSchedPriorityAdjustment)));
+    retCommand.add("bash");
+    retCommand.addAll(Arrays.asList(commands));
+    return retCommand.toArray(new String[retCommand.size()]);
+
+}
   /**
    * Is the container still active?
    * @param containerId

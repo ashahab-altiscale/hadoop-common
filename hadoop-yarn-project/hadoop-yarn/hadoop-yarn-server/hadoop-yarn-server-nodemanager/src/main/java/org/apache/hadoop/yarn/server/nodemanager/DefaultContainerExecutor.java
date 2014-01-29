@@ -18,19 +18,7 @@
 
 package org.apache.hadoop.yarn.server.nodemanager;
 
-import static org.apache.hadoop.fs.CreateFlag.CREATE;
-import static org.apache.hadoop.fs.CreateFlag.OVERWRITE;
-
-import java.io.DataOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.PrintStream;
-import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.EnumSet;
-import java.util.List;
-
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.fs.FileContext;
@@ -51,7 +39,20 @@ import org.apache.hadoop.yarn.server.nodemanager.containermanager.launcher.Conta
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.localizer.ContainerLocalizer;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 
-import com.google.common.annotations.VisibleForTesting;
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintStream;
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.List;
+
+import static org.apache.hadoop.fs.CreateFlag.CREATE;
+import static org.apache.hadoop.fs.CreateFlag.OVERWRITE;
 
 public class DefaultContainerExecutor extends ContainerExecutor {
 
@@ -78,7 +79,7 @@ public class DefaultContainerExecutor extends ContainerExecutor {
   public void init() throws IOException {
     // nothing to do or verify here
   }
-  
+
   @Override
   public synchronized void startLocalizer(Path nmPrivateContainerTokensPath,
       InetSocketAddress nmAddr, String user, String appId, String locId,
@@ -107,12 +108,13 @@ public class DefaultContainerExecutor extends ContainerExecutor {
     localizer.runLocalization(nmAddr);
   }
 
+
   @Override
   public int launchContainer(Container container,
       Path nmPrivateContainerScriptPath, Path nmPrivateTokensPath,
       String userName, String appId, Path containerWorkDir,
       List<String> localDirs, List<String> logDirs) throws IOException {
-
+    LOG.debug("Launching default: " + container);
     FsPermission dirPerm = new FsPermission(APPDIR_PERM);
     ContainerId containerId = container.getContainerId();
 
@@ -164,9 +166,41 @@ public class DefaultContainerExecutor extends ContainerExecutor {
         WIN_MAX_PATH, YarnConfiguration.NM_LOCAL_DIRS));
     }
 
+    String firstLocalDir = localDirs.get(0);
+    String commandStr = String.format("sudo docker run -v %s:%s:rw -u %s namenode",
+            firstLocalDir, firstLocalDir, containerIdStr, userName);
+    commandStr += " ls -l \"" +
+            firstLocalDir + "\"";
+    Process p = Runtime.getRuntime().exec(commandStr);
+    try {
+      p.waitFor();
+    } catch (InterruptedException e) {
+      throw new RuntimeException(e);
+    }
+
+    BufferedReader reader =
+            new BufferedReader(new InputStreamReader(p.getInputStream()));
+
+    String line = "";
+
+    while ((line = reader.readLine())!= null) {
+      LOG.info("line: " + line);
+    }
+
+    BufferedReader reader1 =
+            new BufferedReader(new InputStreamReader(p.getErrorStream()));
+
+    String line1 = "";
+    LOG.info("Error lines:");
+    while ((line1 = reader1.readLine())!= null) {
+      LOG.info("line: " + line1);
+    }
+    commandStr = String.format("sudo docker run -v %s:%s:rw -name %s -u %s namenode",
+            firstLocalDir, firstLocalDir, containerIdStr, userName);
+    LOG.info("Passing: " +commandStr);
     Path pidFile = getPidFilePath(containerId);
     if (pidFile != null) {
-      sb.writeLocalWrapperScript(launchDst, pidFile);
+      sb.writeLocalWrapperScript(launchDst, pidFile, commandStr);
     } else {
       LOG.info("Container " + containerIdStr
           + " was marked as inactive. Returning terminated error");
@@ -184,7 +218,7 @@ public class DefaultContainerExecutor extends ContainerExecutor {
 
       // Setup command to run
       String[] command = getRunCommand(sb.getWrapperScriptPath().toString(),
-        containerIdStr, this.getConf());
+              containerIdStr, this.getConf());
 
       LOG.info("launchContainer: " + Arrays.toString(command));
       shExec = new ShellCommandExecutor(
@@ -236,21 +270,21 @@ public class DefaultContainerExecutor extends ContainerExecutor {
       return wrapperScriptPath;
     }
 
-    public void writeLocalWrapperScript(Path launchDst, Path pidFile) throws IOException {
+    public void writeLocalWrapperScript(Path launchDst, Path pidFile, String commandStr) throws IOException {
       DataOutputStream out = null;
       PrintStream pout = null;
 
       try {
         out = lfs.create(wrapperScriptPath, EnumSet.of(CREATE, OVERWRITE));
         pout = new PrintStream(out);
-        writeLocalWrapperScript(launchDst, pidFile, pout);
+        writeLocalWrapperScript(launchDst, pidFile, pout, commandStr);
       } finally {
         IOUtils.cleanup(LOG, pout, out);
       }
     }
 
     protected abstract void writeLocalWrapperScript(Path launchDst, Path pidFile,
-        PrintStream pout);
+                                                    PrintStream pout, String commandStr);
 
     protected LocalWrapperScriptBuilder(Path containerWorkDir) {
       this.wrapperScriptPath = new Path(containerWorkDir,
@@ -267,16 +301,18 @@ public class DefaultContainerExecutor extends ContainerExecutor {
 
     @Override
     public void writeLocalWrapperScript(Path launchDst, Path pidFile,
-        PrintStream pout) {
+                                        PrintStream pout, String commandStr) {
 
       // We need to do a move as writing to a file is not atomic
       // Process reading a file being written to may get garbled data
       // hence write pid to tmp file first followed by a mv
       pout.println("#!/bin/bash");
       pout.println();
+
       pout.println("echo $$ > " + pidFile.toString() + ".tmp");
       pout.println("/bin/mv -f " + pidFile.toString() + ".tmp " + pidFile);
       String exec = Shell.isSetsidAvailable? "exec setsid" : "exec";
+      exec = commandStr;
       pout.println(exec + " /bin/bash \"" +
         launchDst.toUri().getPath().toString() + "\"");
     }
@@ -296,7 +332,7 @@ public class DefaultContainerExecutor extends ContainerExecutor {
 
     @Override
     public void writeLocalWrapperScript(Path launchDst, Path pidFile,
-        PrintStream pout) {
+                                        PrintStream pout, String commandStr) {
 
       // On Windows, the pid is the container ID, so that it can also serve as
       // the name of the job object created by winutils for task management.
