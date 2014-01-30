@@ -167,8 +167,9 @@ public class DefaultContainerExecutor extends ContainerExecutor {
     }
 
     String firstLocalDir = localDirs.get(0);
-    String commandStr = String.format("sudo -u %s -i sudo docker run -privileged -v %s:%s -w %s -u %s namenode ls -l %s",
-            userName, firstLocalDir, firstLocalDir, firstLocalDir, userName, sb.getWrapperScriptPath().toString());
+    String firstLogDir = logDirs.get(0);
+    String commandStr = String.format("sudo -u %s -i sudo docker run -privileged -v %s:%s -v %s:%s -u root namenode ls -l %s",
+            System.getProperty("user.name"), firstLocalDir, firstLocalDir, firstLogDir, firstLogDir, containerWorkDir.toString());
     LOG.info("Listing: " +commandStr + " user: " + System.getProperty("user.name"));
 
     Process p = Runtime.getRuntime().exec(commandStr);
@@ -195,8 +196,8 @@ public class DefaultContainerExecutor extends ContainerExecutor {
     while ((line1 = reader1.readLine())!= null) {
       LOG.info("line: " + line1);
     }
-    commandStr = String.format("sudo docker run -privileged -v %s:%s -w %s -u root -name %s namenode",
-            firstLocalDir, firstLocalDir, firstLocalDir, containerIdStr);
+    commandStr = String.format("sudo -u %s -i sudo docker run -privileged -v %s:%s -v %s:%s -u root -name %s namenode",
+            System.getProperty("user.name"), firstLocalDir, firstLocalDir, firstLogDir, firstLogDir, containerIdStr);
     LOG.info("Passing: " +commandStr);
     Path pidFile = getPidFilePath(containerId);
     if (pidFile != null) {
