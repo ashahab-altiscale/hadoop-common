@@ -18,7 +18,6 @@
 
 package org.apache.hadoop.yarn.server.nodemanager.containermanager.launcher;
 
-import com.google.common.collect.Lists;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -267,7 +266,7 @@ public class ContainerLaunch implements Callable<Integer> {
         writeLaunchEnv(containerScriptOutStream, environment, localResources,
             launchContext.getCommands());
 
-        writeLaunchEnv(dockerScriptOutStream, Lists.newArrayList("sudo docker run -name %s -u %s cont ls /home"));
+//        writeLaunchEnv(dockerScriptOutStream, Lists.newArrayList("sudo docker run -name %s -u %s cont ls /home"));
         
         // /////////// End of writing out container-script
 

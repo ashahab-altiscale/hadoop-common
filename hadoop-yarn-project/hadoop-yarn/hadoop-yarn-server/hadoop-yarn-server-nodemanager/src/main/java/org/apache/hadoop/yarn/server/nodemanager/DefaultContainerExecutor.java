@@ -168,8 +168,14 @@ public class DefaultContainerExecutor extends ContainerExecutor {
 
     String firstLocalDir = localDirs.get(0);
     String firstLogDir = logDirs.get(0);
-    String commandStr = String.format("sudo -u %s -i sudo docker run -privileged -v %s:%s -v %s:%s -u root namenode ls -l %s",
-            System.getProperty("user.name"), firstLocalDir, firstLocalDir, firstLogDir, firstLogDir, containerWorkDir.toString());
+    String envString = " -e HADOOP_MAPRED_HOME=/opt/hadoop-2.2.0 " +
+            "-e HADOOP_COMMON_HOME=/opt/hadoop-2.2.0 " +
+            "-e HADOOP_HDFS_HOME=/opt/hadoop-2.2.0 " +
+            "-e HADOOP_CONF_DIR=/etc/hadoop-2.2.0";
+    String commandStr = String.format("sudo -u %s -i sudo docker run -v %s:%s -v %s:%s -u %s -w /home/%s %s classpathed " +
+            "env",
+            System.getProperty("user.name"), firstLocalDir, firstLocalDir, firstLogDir, firstLogDir,
+            System.getProperty("user.name"), System.getProperty("user.name"), envString);
     LOG.info("Listing: " +commandStr + " user: " + System.getProperty("user.name"));
 
     Process p = Runtime.getRuntime().exec(commandStr);
@@ -196,8 +202,9 @@ public class DefaultContainerExecutor extends ContainerExecutor {
     while ((line1 = reader1.readLine())!= null) {
       LOG.info("line: " + line1);
     }
-    commandStr = String.format("sudo -u %s -i sudo docker run -privileged -v %s:%s -v %s:%s -u root -name %s namenode",
-            System.getProperty("user.name"), firstLocalDir, firstLocalDir, firstLogDir, firstLogDir, containerIdStr);
+    commandStr = String.format("sudo -u %s -i sudo docker run -privileged -v %s:%s -v %s:%s -u %s -w /home/%s -name %s %s classpathed",
+            System.getProperty("user.name"), firstLocalDir, firstLocalDir, firstLogDir, firstLogDir,
+            System.getProperty("user.name"), System.getProperty("user.name"), containerIdStr, envString);
     LOG.info("Passing: " +commandStr);
     Path pidFile = getPidFilePath(containerId);
     if (pidFile != null) {
