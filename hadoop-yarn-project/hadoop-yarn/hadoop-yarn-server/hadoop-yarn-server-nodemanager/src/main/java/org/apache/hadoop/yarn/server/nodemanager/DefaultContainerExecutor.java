@@ -39,11 +39,9 @@ import org.apache.hadoop.yarn.server.nodemanager.containermanager.launcher.Conta
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.localizer.ContainerLocalizer;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 
-import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
@@ -172,37 +170,37 @@ public class DefaultContainerExecutor extends ContainerExecutor {
             "-e HADOOP_COMMON_HOME=/opt/hadoop-2.2.0 " +
             "-e HADOOP_HDFS_HOME=/opt/hadoop-2.2.0 " +
             "-e HADOOP_CONF_DIR=/etc/hadoop-2.2.0";
-    String commandStr = String.format("sudo -u %s -i sudo docker run -v %s:%s -v %s:%s -u %s -w /home/%s %s classpathed " +
-            "env",
-            System.getProperty("user.name"), firstLocalDir, firstLocalDir, firstLogDir, firstLogDir,
-            System.getProperty("user.name"), System.getProperty("user.name"), envString);
-    LOG.info("Listing: " +commandStr + " user: " + System.getProperty("user.name"));
-
-    Process p = Runtime.getRuntime().exec(commandStr);
-    try {
-      p.waitFor();
-    } catch (InterruptedException e) {
-      throw new RuntimeException(e);
-    }
-
-    BufferedReader reader =
-            new BufferedReader(new InputStreamReader(p.getInputStream()));
-
-    String line = "";
-
-    while ((line = reader.readLine())!= null) {
-      LOG.info("line: " + line);
-    }
-
-    BufferedReader reader1 =
-            new BufferedReader(new InputStreamReader(p.getErrorStream()));
-
-    String line1 = "";
-    LOG.info("Error lines:");
-    while ((line1 = reader1.readLine())!= null) {
-      LOG.info("line: " + line1);
-    }
-    commandStr = String.format("sudo -u %s -i sudo docker run -privileged -v %s:%s -v %s:%s -u %s -w /home/%s -name %s %s classpathed",
+//    String commandStr = String.format("sudo -u %s -i sudo docker run -v %s:%s -v %s:%s -u %s -w /home/%s %s classpathed " +
+//            "env",
+//            System.getProperty("user.name"), firstLocalDir, firstLocalDir, firstLogDir, firstLogDir,
+//            System.getProperty("user.name"), System.getProperty("user.name"), envString);
+//    LOG.info("Listing: " +commandStr + " user: " + System.getProperty("user.name"));
+//
+//    Process p = Runtime.getRuntime().exec(commandStr);
+//    try {
+//      p.waitFor();
+//    } catch (InterruptedException e) {
+//      throw new RuntimeException(e);
+//    }
+//
+//    BufferedReader reader =
+//            new BufferedReader(new InputStreamReader(p.getInputStream()));
+//
+//    String line = "";
+//
+//    while ((line = reader.readLine())!= null) {
+//      LOG.info("line: " + line);
+//    }
+//
+//    BufferedReader reader1 =
+//            new BufferedReader(new InputStreamReader(p.getErrorStream()));
+//
+//    String line1 = "";
+//    LOG.info("Error lines:");
+//    while ((line1 = reader1.readLine())!= null) {
+//      LOG.info("line: " + line1);
+//    }
+    String commandStr = String.format("sudo -u %s -i sudo docker run -rm -v %s:%s -v %s:%s -u %s -w /home/%s -name %s %s classpathed",
             System.getProperty("user.name"), firstLocalDir, firstLocalDir, firstLogDir, firstLogDir,
             System.getProperty("user.name"), System.getProperty("user.name"), containerIdStr, envString);
     LOG.info("Passing: " +commandStr);
