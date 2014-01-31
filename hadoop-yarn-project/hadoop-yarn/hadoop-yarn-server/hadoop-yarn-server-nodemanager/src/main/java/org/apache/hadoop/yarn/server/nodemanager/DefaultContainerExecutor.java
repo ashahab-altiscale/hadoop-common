@@ -19,6 +19,7 @@
 package org.apache.hadoop.yarn.server.nodemanager;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.apache.commons.lang.text.StrSubstitutor;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.fs.FileContext;
@@ -47,7 +48,9 @@ import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.hadoop.fs.CreateFlag.CREATE;
 import static org.apache.hadoop.fs.CreateFlag.OVERWRITE;
@@ -170,39 +173,19 @@ public class DefaultContainerExecutor extends ContainerExecutor {
             "-e HADOOP_COMMON_HOME=/opt/hadoop-2.2.0 " +
             "-e HADOOP_HDFS_HOME=/opt/hadoop-2.2.0 " +
             "-e HADOOP_CONF_DIR=/etc/hadoop-2.2.0";
-//    String commandStr = String.format("sudo -u %s -i sudo docker run -v %s:%s -v %s:%s -u %s -w /home/%s %s classpathed " +
-//            "env",
-//            System.getProperty("user.name"), firstLocalDir, firstLocalDir, firstLogDir, firstLogDir,
-//            System.getProperty("user.name"), System.getProperty("user.name"), envString);
-//    LOG.info("Listing: " +commandStr + " user: " + System.getProperty("user.name"));
-//
-//    Process p = Runtime.getRuntime().exec(commandStr);
-//    try {
-//      p.waitFor();
-//    } catch (InterruptedException e) {
-//      throw new RuntimeException(e);
-//    }
-//
-//    BufferedReader reader =
-//            new BufferedReader(new InputStreamReader(p.getInputStream()));
-//
-//    String line = "";
-//
-//    while ((line = reader.readLine())!= null) {
-//      LOG.info("line: " + line);
-//    }
-//
-//    BufferedReader reader1 =
-//            new BufferedReader(new InputStreamReader(p.getErrorStream()));
-//
-//    String line1 = "";
-//    LOG.info("Error lines:");
-//    while ((line1 = reader1.readLine())!= null) {
-//      LOG.info("line: " + line1);
-//    }
-    String commandStr = String.format("sudo -u %s -i sudo docker run -rm -v %s:%s -v %s:%s -u %s -w /home/%s -name %s %s classpathed",
-            System.getProperty("user.name"), firstLocalDir, firstLocalDir, firstLogDir, firstLogDir,
-            System.getProperty("user.name"), System.getProperty("user.name"), containerIdStr, envString);
+
+    Map<String, String> valuesMap = new HashMap();
+    valuesMap.put("userName", userName);
+    valuesMap.put("firstLocalDir", firstLocalDir);
+    valuesMap.put("firstLogDir", firstLogDir);
+    valuesMap.put("containerId", containerIdStr);
+    valuesMap.put("env", envString);
+    valuesMap.put("image", "classpathed");
+    String templateString = "sudo -u ${userName} -i sudo docker run -rm " +
+            "-v ${firstLocalDir}:${firstLocalDir} -v ${firstLogDir}:${firstLogDir} " +
+            "-w /home/${userName} -name ${containerId} ${env} ${image}";
+    StrSubstitutor sub = new StrSubstitutor(valuesMap);
+    String commandStr = sub.replace(templateString);
     LOG.info("Passing: " +commandStr);
     Path pidFile = getPidFilePath(containerId);
     if (pidFile != null) {
