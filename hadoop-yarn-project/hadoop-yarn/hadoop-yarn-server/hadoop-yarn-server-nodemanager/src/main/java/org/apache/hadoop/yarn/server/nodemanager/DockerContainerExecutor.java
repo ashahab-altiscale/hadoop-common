@@ -169,21 +169,15 @@ public int launchContainer(Container container,
 
   String firstLocalDir = localDirs.get(0);
   String firstLogDir = logDirs.get(0);
-  String envString = " -e HADOOP_MAPRED_HOME=/opt/hadoop-2.2.0 " +
-          "-e HADOOP_COMMON_HOME=/opt/hadoop-2.2.0 " +
-          "-e HADOOP_HDFS_HOME=/opt/hadoop-2.2.0 " +
-          "-e HADOOP_CONF_DIR=/etc/hadoop-2.2.0";
-
   Map<String, String> valuesMap = new HashMap();
   valuesMap.put("userName", userName);
   valuesMap.put("firstLocalDir", firstLocalDir);
   valuesMap.put("firstLogDir", firstLogDir);
   valuesMap.put("containerId", containerIdStr);
-  valuesMap.put("env", envString);
   valuesMap.put("image", "classpathed");
   String templateString = "sudo -u ${userName} -i sudo docker run -rm " +
           "-v ${firstLocalDir}:${firstLocalDir} -v ${firstLogDir}:${firstLogDir} " +
-          "-w /home/${userName} -name ${containerId} ${env} ${image}";
+          "-w /home/${userName} -name ${containerId} ${image}";
   StrSubstitutor sub = new StrSubstitutor(valuesMap);
   String commandStr = sub.replace(templateString);
   LOG.info("Passing: " +commandStr);

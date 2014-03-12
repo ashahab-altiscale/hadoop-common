@@ -18,27 +18,7 @@
 
 package org.apache.hadoop.yarn.server.nodemanager.containermanager.launcher;
 
-import static org.junit.Assert.assertEquals;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.spy;
-
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.FileReader;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
 import junit.framework.Assert;
-
 import org.apache.commons.codec.binary.Base64;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileUtil;
@@ -73,7 +53,6 @@ import org.apache.hadoop.yarn.security.ContainerTokenIdentifier;
 import org.apache.hadoop.yarn.server.nodemanager.ContainerExecutor.ExitCode;
 import org.apache.hadoop.yarn.server.nodemanager.DefaultContainerExecutor;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.BaseContainerManagerTest;
-import org.apache.hadoop.yarn.server.nodemanager.containermanager.ContainerManagerImpl;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.Container;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.ContainerEventType;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.ContainerExitEvent;
@@ -85,6 +64,24 @@ import org.apache.hadoop.yarn.util.LinuxResourceCalculatorPlugin;
 import org.apache.hadoop.yarn.util.ResourceCalculatorPlugin;
 import org.junit.Before;
 import org.junit.Test;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.Assert.assertEquals;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class TestContainerLaunch extends BaseContainerManagerTest {
 
@@ -137,7 +134,7 @@ public class TestContainerLaunch extends BaseContainerManagerTest {
         commands.add("/bin/sh ./\\\"" + badSymlink + "\\\"");
       }
 
-      ContainerLaunch.writeLaunchEnv(fos, env, resources, commands);
+      ContainerLaunch.writeLaunchEnv(fos, null, env, resources, commands);
       fos.flush();
       fos.close();
       FileUtil.setExecutable(tempFile, true);
@@ -204,7 +201,7 @@ public class TestContainerLaunch extends BaseContainerManagerTest {
       } else {
         commands.add("/bin/sh ./\\\"" + symLink + "\\\"");
       }
-      ContainerLaunch.writeLaunchEnv(fos, env, resources, commands);
+      ContainerLaunch.writeLaunchEnv(fos, null, env, resources, commands);
       fos.flush();
       fos.close();
       FileUtil.setExecutable(tempFile, true);
@@ -257,7 +254,7 @@ public class TestContainerLaunch extends BaseContainerManagerTest {
           "\"workflowName\":\"\n\ninsert table " +
           "\npartition (cd_education_status)\nselect cd_demo_sk, cd_gender, " );
       List<String> commands = new ArrayList<String>();
-      ContainerLaunch.writeLaunchEnv(fos, env, resources, commands);
+      ContainerLaunch.writeLaunchEnv(fos, null, env, resources, commands);
       fos.flush();
       fos.close();
 
@@ -305,7 +302,7 @@ public class TestContainerLaunch extends BaseContainerManagerTest {
       Map<String, String> env = new HashMap<String, String>();
       List<String> commands = new ArrayList<String>();
       commands.add(command);
-      ContainerLaunch.writeLaunchEnv(fos, env, resources, commands);
+      ContainerLaunch.writeLaunchEnv(fos, null, env, resources, commands);
       fos.flush();
       fos.close();
 

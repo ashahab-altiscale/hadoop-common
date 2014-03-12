@@ -204,7 +204,6 @@ public class ContainerLaunch implements Callable<Integer> {
                       containerIdStr));
 
       DataOutputStream containerScriptOutStream = null;
-      DataOutputStream dockerScriptOutStream = null;
       DataOutputStream tokensOutStream = null;
 
       // Select the working directory for the container
@@ -249,11 +248,28 @@ public class ContainerLaunch implements Callable<Integer> {
         containerScriptOutStream =
           lfs.create(nmPrivateContainerScriptPath,
               EnumSet.of(CREATE, OVERWRITE));
-        dockerScriptOutStream =
-                lfs.create(nmPrivateDockerScriptPath,
-                        EnumSet.of(CREATE, OVERWRITE));
 
         // Set the token location too.
+        Map<String, String> preEnvironment = new HashMap<String, String>();
+
+        putEnvIfNotNull(preEnvironment,
+                Environment.HADOOP_CONF_DIR.name(),
+                System.getenv(Environment.HADOOP_CONF_DIR.name())
+        );
+        putEnvIfNotNull(preEnvironment,
+                Environment.HADOOP_COMMON_HOME.name(),
+                System.getenv(Environment.HADOOP_COMMON_HOME.name())
+        );
+        putEnvIfNotNull(preEnvironment,
+                Environment.HADOOP_HDFS_HOME.name(),
+                System.getenv(Environment.HADOOP_HDFS_HOME.name())
+        );
+        putEnvIfNotNull(preEnvironment,
+                "HADOOP_MAPRED_HOME",
+                System.getenv("HADOOP_MAPRED_HOME")
+        );
+        LOG.info("Environment: " + preEnvironment);
+
         environment.put(
             ApplicationConstants.CONTAINER_TOKEN_FILE_ENV_NAME, 
             new Path(containerWorkDir, 
@@ -263,8 +279,8 @@ public class ContainerLaunch implements Callable<Integer> {
           localResources);
         
         // Write out the environment
-        writeLaunchEnv(containerScriptOutStream, environment, localResources,
-            launchContext.getCommands());
+        writeLaunchEnv(containerScriptOutStream, preEnvironment, environment,
+                localResources, launchContext.getCommands());
 
 //        writeLaunchEnv(dockerScriptOutStream, Lists.newArrayList("sudo docker run -name %s -u %s cont ls /home"));
         
@@ -720,48 +736,26 @@ public class ContainerLaunch implements Callable<Integer> {
     }
   }
 
-public static void writeLaunchEnv(OutputStream out,
-                           List<String> command)
-        throws IOException {
-  ShellScriptBuilder sb = Shell.WINDOWS ? new WindowsShellScriptBuilder() :
-          new UnixShellScriptBuilder();
-  sb.command(command);
-
-  PrintStream pout = null;
-  PrintStream ps = null;
-  ByteArrayOutputStream baos = null;
-  try {
-    baos = new ByteArrayOutputStream();
-    pout = new PrintStream(out);
-    ps = new PrintStream(baos);
-    sb.write(pout);
-    sb.write(ps);
-  } finally {
-    if (out != null) {
-      out.close();
-    }
-    if (ps != null) {
-      ps.close();
-    }
-    if (baos != null) {
-      LOG.info("docker script: " + baos.toString());
-    }
-  }
-}
 /**
  * This is the inner container script
-  * @param out
- * @param environment
+  *
+ * @param out
+* @param preEnvironment
+ *@param environment
  * @param resources
- * @param command
- * @throws IOException
+ * @param command    @throws IOException
  */
   static void writeLaunchEnv(OutputStream out,
-      Map<String,String> environment, Map<Path,List<String>> resources,
-      List<String> command)
+                             Map<String, String> preEnvironment, Map<String, String> environment, Map<Path, List<String>> resources,
+                             List<String> command)
       throws IOException {
     ShellScriptBuilder sb = Shell.WINDOWS ? new WindowsShellScriptBuilder() :
       new UnixShellScriptBuilder();
+    if (preEnvironment != null) {
+      for (Map.Entry<String,String> env : preEnvironment.entrySet()) {
+        sb.env(env.getKey().toString(), env.getValue().toString());
+      }
+    }
     if (environment != null) {
       for (Map.Entry<String,String> env : environment.entrySet()) {
         sb.env(env.getKey().toString(), env.getValue().toString());
