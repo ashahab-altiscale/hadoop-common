@@ -22,7 +22,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
-
 import org.apache.commons.lang.math.RandomUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -51,16 +50,16 @@ import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.regex.Pattern;
-import java.net.InetSocketAddress;
+
 import static org.apache.hadoop.fs.CreateFlag.CREATE;
 import static org.apache.hadoop.fs.CreateFlag.OVERWRITE;
 
@@ -90,7 +89,7 @@ public class DockerContainerExecutor extends ContainerExecutor {
     }
   }
 
-  protected void copyFile(Path src, Path dst, String owner) throws IOException {
+  private void copyFile(Path src, Path dst, String owner) throws IOException {
     lfs.util().copy(src, dst);
   }
 
@@ -102,7 +101,9 @@ public class DockerContainerExecutor extends ContainerExecutor {
     }
     String dockerExecutor = getConf().get(YarnConfiguration.NM_DOCKER_CONTAINER_EXECUTOR_EXEC_NAME,
       YarnConfiguration.NM_DEFAULT_DOCKER_CONTAINER_EXECUTOR_EXEC_NAME);
-    if (!new File(dockerExecutor).exists()) {
+    String[] arr = dockerExecutor.split("\\s");
+
+    if (!new File(arr[0]).exists()) {
       throw new IllegalStateException("Invalid docker exec path: " + dockerExecutor);
     }
   }
@@ -201,7 +202,7 @@ public class DockerContainerExecutor extends ContainerExecutor {
         .append(" ")
         .append("run")
         .append(" ")
-        .append("--rm --net=host")
+        .append("--net=host")
         .append(" ")
         .append(" --name " + containerIdStr)
         .append(localDirMount)
@@ -211,9 +212,10 @@ public class DockerContainerExecutor extends ContainerExecutor {
         .append(containerImageName)
         .toString();
     String dockerPidScript = "`" + dockerExecutor + " inspect --format {{.State.Pid}} " + containerIdStr + "`";
+    String dockerRmScript = dockerExecutor + " rm " + containerIdStr;
     // Create new local launch wrapper script
     LocalWrapperScriptBuilder sb =
-      new UnixLocalWrapperScriptBuilder(containerWorkDir, commandStr, dockerPidScript);
+      new UnixLocalWrapperScriptBuilder(containerWorkDir, commandStr, dockerPidScript, dockerRmScript);
     Path pidFile = getPidFilePath(containerId);
     if (pidFile != null) {
       sb.writeLocalWrapperScript(launchDst, pidFile);
@@ -389,7 +391,7 @@ public class DockerContainerExecutor extends ContainerExecutor {
    * @param signal signal to send
    * (for logging).
    */
-  protected void killContainer(String pid, Signal signal) throws IOException {
+  private void killContainer(String pid, Signal signal) throws IOException {
     new ShellCommandExecutor(Shell.getSignalKillCommand(signal.getValue(), pid))
       .execute();
   }
@@ -462,11 +464,12 @@ public class DockerContainerExecutor extends ContainerExecutor {
     private final Path sessionScriptPath;
     private final String dockerCommand;
     private final String dockerPidScript;
-
-    public UnixLocalWrapperScriptBuilder(Path containerWorkDir, String dockerCommand, String dockerPidScript) {
+    private final String dockerRmScript;
+    public UnixLocalWrapperScriptBuilder(Path containerWorkDir, String dockerCommand, String dockerPidScript, String dockerRmScript) {
       super(containerWorkDir);
       this.dockerCommand = dockerCommand;
       this.dockerPidScript = dockerPidScript;
+      this.dockerRmScript = dockerRmScript;
       this.sessionScriptPath = new Path(containerWorkDir,
         Shell.appendScriptExtension(DOCKER_CONTAINER_EXECUTOR_SESSION_SCRIPT));
     }
@@ -479,7 +482,7 @@ public class DockerContainerExecutor extends ContainerExecutor {
     }
 
     @Override
-    public void writeLocalWrapperScript(Path launchDst, Path pidFile,
+    protected void writeLocalWrapperScript(Path launchDst, Path pidFile,
                                         PrintStream pout) {
 
       String exitCodeFile = ContainerLaunch.getExitCodeFile(
@@ -505,10 +508,13 @@ public class DockerContainerExecutor extends ContainerExecutor {
         // hence write pid to tmp file first followed by a mv
         pout.println("#!/usr/bin/env bash");
         pout.println();
-        pout.println("echo "+ dockerPidScript +" > " + pidFile.toString() + ".tmp");
-        pout.println("/bin/mv -f " + pidFile.toString() + ".tmp " + pidFile);
         pout.println(dockerCommand + " bash \"" +
           launchDst.toUri().getPath().toString() + "\"");
+        pout.println();
+        pout.println("echo "+ dockerPidScript +" > " + pidFile.toString() + ".tmp");
+        pout.println("/bin/mv -f " + pidFile.toString() + ".tmp " + pidFile);
+        pout.println(dockerRmScript);
+        pout.println();
       } finally {
         IOUtils.cleanup(LOG, pout, out);
       }
@@ -517,7 +523,7 @@ public class DockerContainerExecutor extends ContainerExecutor {
     }
   }
 
-  protected void createDir(Path dirPath, FsPermission perms,
+  private void createDir(Path dirPath, FsPermission perms,
                            boolean createParent, String user) throws IOException {
     lfs.mkdir(dirPath, perms, createParent);
     if (!perms.equals(perms.applyUMask(lfs.getUMask()))) {
@@ -706,7 +712,7 @@ public class DockerContainerExecutor extends ContainerExecutor {
         ContainerLocalizer.FILECACHE);
   }
 
-  protected Path getWorkingDir(List<String> localDirs, String user,
+  private Path getWorkingDir(List<String> localDirs, String user,
                                String appId) throws IOException {
     Path appStorageDir = null;
     long totalAvailable = 0L;
